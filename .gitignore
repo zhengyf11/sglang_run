@@ -1,5 +1,8 @@
 # Local tool state and generated hidden directories
-.relay/
+.*/
+
+# Keep repository-level hidden files that are intentionally versioned
+!.gitignore
 
 # Python bytecode and cache directories
 __pycache__/
