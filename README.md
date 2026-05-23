@@ -4,7 +4,7 @@
 
 本仓库提供零第三方 Python 依赖的命令行脚本：
 
-- `run_sglang_container.py`：生成并执行 `docker run` 命令，通过 `--entrypoint /bin/bash` 与 `tail -f /dev/null` 让容器长期运行，不启动任何 SGLang 进程。镜像名、容器名、GPU、共享内存、挂载目录、环境变量等容器层动态字段都可以通过标准 `--key value` 形式传入；网络固定使用 `--net=host`，不提供端口映射参数。
+- `run_sglang_container.py`：生成并执行 `docker run` 命令，默认添加 `--privileged` 给容器超级权限，并通过 `--entrypoint /bin/bash` 与 `tail -f /dev/null` 让容器长期运行，不启动任何 SGLang 进程。镜像名、容器名、GPU、共享内存、挂载目录、环境变量等容器层动态字段都可以通过标准 `--key value` 形式传入；网络固定使用 `--net=host`，不提供端口映射参数。
 - `run_sglang_prefill.py`：按 Issue #2 的 p-d 分离 prefill 配置启动 `python3 -m sglang.launch_server`，支持通过标准 `--key value` 形式覆盖模型、端口、并行度、disaggregation 与 NCCL 网络参数。
 
 ## 环境要求
@@ -34,10 +34,10 @@ python run_sglang_container.py \
   --gpus all
 ```
 
-默认会生成后台运行的类似命令（脚本始终添加 `-d`，不需要额外参数）：
+默认会生成后台运行并带超级权限的类似命令（脚本始终添加 `-d` 和 `--privileged`，不需要额外参数）：
 
 ```bash
-docker run --rm -d --name sglang-qwen --gpus all --shm-size 32g --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
+docker run --rm -d --name sglang-qwen --gpus all --shm-size 32g --privileged --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
 ```
 
 ## 常用示例
@@ -92,6 +92,7 @@ python run_sglang_container.py \
 | `--volume` | 可重复 | Docker volume 映射，格式 `HOST:CONTAINER[:MODE]`。 |
 | `--env` | 可重复 | Docker 环境变量，格式 `KEY=VALUE`。 |
 | `--docker-arg` | 可重复 | 追加到镜像名前的额外 Docker 参数。 |
+| 固定 Docker 参数 | `--privileged --net=host --entrypoint /bin/bash` | 脚本默认给容器超级权限，固定使用 host 网络，并用 bash 执行保活命令。 |
 | `--rm` / `--no-rm` | `--rm` | 容器退出后是否自动删除；容器始终使用 `docker run -d` 后台运行。 |
 | `--dry-run` | `false` | 只打印命令，不执行 Docker。 |
 

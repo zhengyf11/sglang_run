@@ -119,7 +119,7 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
     if args.shm_size:
         cmd.extend(["--shm-size", args.shm_size])
 
-    cmd.extend(["--net=host", "--entrypoint", "/bin/bash"])
+    cmd.extend(["--privileged", "--net=host", "--entrypoint", "/bin/bash"])
 
     for volume in args.volume:
         cmd.extend(["-v", volume])
