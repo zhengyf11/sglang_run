@@ -90,19 +90,21 @@ python run_sglang_container.py \
 
 `prefill_command_web.py` 会启动一个本地网站，用于生成 SGLang disaggregation prefill 启动命令。用户可以在页面中填写或选择参数；字段为空、缺失或 `null` 时使用 Issue #2 默认值。页面会调用本地 API 实时刷新输出窗口中的 shell 命令。
 
-启动 Web UI：
+Web UI 默认监听浏览器安全端口 `6060`，也可以通过 `--port` 显式覆盖：
 
 ```bash
-python prefill_command_web.py --host 127.0.0.1 --port 6000
+python prefill_command_web.py --host 127.0.0.1
+# 或者指定其他端口
+python prefill_command_web.py --host 127.0.0.1 --port 8080
 ```
 
 打开：
 
 ```text
-http://127.0.0.1:6000/
+http://127.0.0.1:6060/
 ```
 
-页面和 API 只生成命令文本，不会启动 SGLang，不会设置 ulimit，不会清理当前进程环境，也不会调用 `subprocess.run`。
+页面代码位于 `web/` 目录（`index.html`、`styles.css`、`app.js`），Python 只负责提供静态文件和本地 API。页面包含参数分组表单、实时命令输出、复制按钮、状态提示和 API 错误提示。页面和 API 只生成命令文本，不会启动 SGLang，不会设置 ulimit，不会清理当前进程环境，也不会调用 `subprocess.run`。
 
 ### 默认生成的 prefill 参数
 
@@ -140,7 +142,7 @@ Web UI 使用以下本地接口：
 `POST /api/command` 示例：
 
 ```bash
-curl -s http://127.0.0.1:6000/api/command \
+curl -s http://127.0.0.1:6060/api/command \
   -H 'Content-Type: application/json' \
   -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","tensor_parallel_size":4,"extra_sglang_args":"--log-level debug"}'
 ```
