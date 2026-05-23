@@ -8,29 +8,43 @@ import run_sglang_container
 
 
 class ParseArgsTests(unittest.TestCase):
-    def test_model_is_required(self) -> None:
-        with self.assertRaises(SystemExit):
-            run_sglang_container.parse_args([])
+    def test_model_is_not_required(self) -> None:
+        args = run_sglang_container.parse_args([])
 
-    def test_passthrough_options_accept_dash_prefixed_values(self) -> None:
+        self.assertEqual(args.image, "lmsysorg/sglang:latest")
+        self.assertEqual(args.container_name, "sglang")
+
+    def test_docker_passthrough_option_accepts_dash_prefixed_values(self) -> None:
         args = run_sglang_container.parse_args(
             [
-                "--model",
-                "model-id",
                 "--docker-arg",
                 "--ipc=host",
-                "--sglang-arg",
-                "--trust-remote-code",
             ]
         )
 
         self.assertEqual(args.docker_arg, ["--ipc=host"])
-        self.assertEqual(args.sglang_arg, ["--trust-remote-code"])
+
+    def test_removed_sglang_and_port_options_are_rejected(self) -> None:
+        removed_options = [
+            ["--model", "model-id"],
+            ["--host", "0.0.0.0"],
+            ["--port", "30000"],
+            ["--host-port", "30000"],
+            ["--container-port", "30000"],
+            ["--tp", "2"],
+            ["--served-model-name", "qwen"],
+            ["--mem-fraction-static", "0.8"],
+            ["--sglang-arg", "--trust-remote-code"],
+        ]
+
+        for option in removed_options:
+            with self.subTest(option=option), self.assertRaises(SystemExit):
+                run_sglang_container.parse_args(option)
 
 
 class BuildDockerCommandTests(unittest.TestCase):
-    def test_builds_default_command_with_required_model(self) -> None:
-        args = run_sglang_container.parse_args(["--model", "Qwen/Qwen2.5-7B-Instruct"])
+    def test_builds_default_keepalive_command(self) -> None:
+        args = run_sglang_container.parse_args([])
 
         cmd = run_sglang_container.build_docker_command(args)
 
@@ -41,30 +55,24 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--gpus") + 1], "all")
         self.assertIn("--shm-size", cmd)
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "32g")
-        self.assertIn("-p", cmd)
-        self.assertEqual(cmd[cmd.index("-p") + 1], "30000:30000")
+        self.assertIn("--net=host", cmd)
+        self.assertIn("--entrypoint", cmd)
+        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertIn("lmsysorg/sglang:latest", cmd)
-        self.assertIn("python3", cmd)
-        self.assertIn("sglang.launch_server", cmd)
-        self.assertIn("--model-path", cmd)
-        self.assertEqual(cmd[cmd.index("--model-path") + 1], "Qwen/Qwen2.5-7B-Instruct")
-        self.assertEqual(cmd[cmd.index("--host") + 1], "0.0.0.0")
-        self.assertEqual(cmd[cmd.index("--port") + 1], "30000")
-        self.assertEqual(cmd[cmd.index("--tp") + 1], "1")
+        self.assertEqual(cmd[-3:], ["lmsysorg/sglang:latest", "-lc", "tail -f /dev/null"])
+        self.assertNotIn("-p", cmd)
+        self.assertNotIn("python3", cmd)
+        self.assertNotIn("sglang.launch_server", cmd)
+        self.assertNotIn("--model-path", cmd)
+        self.assertNotIn("--port", cmd)
 
-    def test_dynamic_docker_and_sglang_options_are_applied(self) -> None:
+    def test_dynamic_container_options_are_applied(self) -> None:
         args = run_sglang_container.parse_args(
             [
                 "--image",
                 "custom/sglang:test",
                 "--container-name",
                 "custom-name",
-                "--model",
-                "/models/qwen",
-                "--host-port",
-                "18000",
-                "--container-port",
-                "30000",
                 "--gpus",
                 "none",
                 "--shm-size",
@@ -79,16 +87,6 @@ class BuildDockerCommandTests(unittest.TestCase):
                 "TOKEN=value with spaces",
                 "--docker-arg",
                 "--ipc=host",
-                "--host",
-                "127.0.0.1",
-                "--served-model-name",
-                "qwen",
-                "--tp",
-                "2",
-                "--mem-fraction-static",
-                "0.8",
-                "--sglang-arg",
-                "--trust-remote-code",
             ]
         )
 
@@ -97,7 +95,8 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertNotIn("--gpus", cmd)
         self.assertEqual(cmd[cmd.index("--name") + 1], "custom-name")
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "16g")
-        self.assertEqual(cmd[cmd.index("-p") + 1], "18000:30000")
+        self.assertIn("--net=host", cmd)
+        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertIn("-v", cmd)
         self.assertIn("/data/models:/models:ro", cmd)
         self.assertIn("/data/cache:/cache", cmd)
@@ -105,18 +104,12 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertIn("HF_HOME=/cache", cmd)
         self.assertIn("TOKEN=value with spaces", cmd)
         self.assertLess(cmd.index("--ipc=host"), cmd.index("custom/sglang:test"))
-        self.assertEqual(cmd[cmd.index("--model-path") + 1], "/models/qwen")
-        self.assertEqual(cmd[cmd.index("--host") + 1], "127.0.0.1")
-        self.assertEqual(cmd[cmd.index("--port") + 1], "30000")
-        self.assertEqual(cmd[cmd.index("--tp") + 1], "2")
-        self.assertEqual(cmd[cmd.index("--served-model-name") + 1], "qwen")
-        self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.8")
-        self.assertIn("--trust-remote-code", cmd)
+        self.assertEqual(cmd[-3:], ["custom/sglang:test", "-lc", "tail -f /dev/null"])
+        self.assertNotIn("-p", cmd)
+        self.assertNotIn("sglang.launch_server", cmd)
 
     def test_detach_and_no_rm_options(self) -> None:
-        args = run_sglang_container.parse_args(
-            ["--model", "model-id", "--detach", "--no-rm"]
-        )
+        args = run_sglang_container.parse_args(["--detach", "--no-rm"])
 
         cmd = run_sglang_container.build_docker_command(args)
 
@@ -127,7 +120,7 @@ class BuildDockerCommandTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     def test_dry_run_does_not_call_subprocess(self) -> None:
         with mock.patch.object(run_sglang_container.subprocess, "run") as run_mock:
-            exit_code = run_sglang_container.main(["--model", "model-id", "--dry-run"])
+            exit_code = run_sglang_container.main(["--dry-run"])
 
         self.assertEqual(exit_code, 0)
         run_mock.assert_not_called()
@@ -139,7 +132,7 @@ class MainTests(unittest.TestCase):
             "run",
             return_value=completed,
         ) as run_mock:
-            exit_code = run_sglang_container.main(["--model", "model-id"])
+            exit_code = run_sglang_container.main([])
 
         self.assertEqual(exit_code, 7)
         run_mock.assert_called_once()

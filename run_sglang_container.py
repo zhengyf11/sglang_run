@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run an SGLang server in a Docker container."""
+"""Run a long-lived SGLang Docker container without starting SGLang."""
 
 from __future__ import annotations
 
@@ -12,21 +12,21 @@ from typing import Sequence
 
 DEFAULT_IMAGE = "lmsysorg/sglang:latest"
 DEFAULT_CONTAINER_NAME = "sglang"
-DEFAULT_PORT = "30000"
 DEFAULT_SHM_SIZE = "32g"
+KEEPALIVE_COMMAND = "tail -f /dev/null"
 
 
 def normalize_extra_arg_options(argv: Sequence[str] | None) -> list[str] | None:
-    """Allow --docker-arg/--sglang-arg values that start with a dash.
+    """Allow --docker-arg values that start with a dash.
 
     argparse treats a value such as ``--ipc=host`` after ``--docker-arg`` as a
-    new option instead of as that option's value. Converting only these known
-    passthrough options to ``--key=value`` preserves the user-facing ``--key
-    value`` form while still allowing raw Docker/SGLang flags.
+    new option instead of as that option's value. Converting only this known
+    passthrough option to ``--key=value`` preserves the user-facing ``--key
+    value`` form while still allowing raw Docker flags.
     """
     raw_argv = sys.argv[1:] if argv is None else list(argv)
 
-    passthrough_options = {"--docker-arg", "--sglang-arg"}
+    passthrough_options = {"--docker-arg"}
     normalized: list[str] = []
     index = 0
     while index < len(raw_argv):
@@ -41,9 +41,12 @@ def normalize_extra_arg_options(argv: Sequence[str] | None) -> list[str] | None:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    """Parse command line arguments for the SGLang Docker runner."""
+    """Parse command line arguments for the Docker keepalive runner."""
     parser = argparse.ArgumentParser(
-        description="Run an SGLang Docker container with configurable options."
+        description=(
+            "Run a long-lived SGLang Docker container with /bin/bash keepalive; "
+            "the script does not start an SGLang server process."
+        )
     )
 
     docker_group = parser.add_argument_group("Docker container options")
@@ -56,22 +59,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--container-name",
         default=DEFAULT_CONTAINER_NAME,
         help=f"Docker container name. Defaults to {DEFAULT_CONTAINER_NAME}.",
-    )
-    docker_group.add_argument(
-        "--port",
-        default=DEFAULT_PORT,
-        help=(
-            "Default service port used for both host and container when "
-            "--host-port or --container-port is not provided."
-        ),
-    )
-    docker_group.add_argument(
-        "--host-port",
-        help="Host port to expose. Defaults to --port.",
-    )
-    docker_group.add_argument(
-        "--container-port",
-        help="Container port exposed by SGLang. Defaults to --port.",
     )
     docker_group.add_argument(
         "--gpus",
@@ -116,40 +103,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Extra raw Docker argument appended before the image. Can be repeated.",
     )
 
-    sglang_group = parser.add_argument_group("SGLang server options")
-    sglang_group.add_argument(
-        "--model",
-        required=True,
-        help="Model path or model ID passed to SGLang as --model-path.",
-    )
-    sglang_group.add_argument(
-        "--host",
-        default="0.0.0.0",
-        help="SGLang bind host inside the container. Defaults to 0.0.0.0.",
-    )
-    sglang_group.add_argument(
-        "--served-model-name",
-        help="Optional served model name passed to SGLang.",
-    )
-    sglang_group.add_argument(
-        "--tp",
-        type=int,
-        default=1,
-        help="Tensor parallel size passed as --tp. Defaults to 1.",
-    )
-    sglang_group.add_argument(
-        "--mem-fraction-static",
-        type=float,
-        help="Optional SGLang --mem-fraction-static value.",
-    )
-    sglang_group.add_argument(
-        "--sglang-arg",
-        action="append",
-        default=[],
-        metavar="ARG",
-        help="Extra raw SGLang launch_server argument appended after built-in options. Can be repeated.",
-    )
-
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -160,9 +113,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def build_docker_command(args: argparse.Namespace) -> list[str]:
     """Build the docker run command as a list suitable for subprocess.run."""
-    host_port = args.host_port or args.port
-    container_port = args.container_port or args.port
-
     cmd = ["docker", "run"]
     if args.rm:
         cmd.append("--rm")
@@ -175,7 +125,7 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
     if args.shm_size:
         cmd.extend(["--shm-size", args.shm_size])
 
-    cmd.extend(["-p", f"{host_port}:{container_port}"])
+    cmd.extend(["--net=host", "--entrypoint", "/bin/bash"])
 
     for volume in args.volume:
         cmd.extend(["-v", volume])
@@ -183,28 +133,7 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
         cmd.extend(["-e", env_var])
     cmd.extend(args.docker_arg)
 
-    cmd.append(args.image)
-    cmd.extend(
-        [
-            "python3",
-            "-m",
-            "sglang.launch_server",
-            "--model-path",
-            args.model,
-            "--host",
-            args.host,
-            "--port",
-            str(container_port),
-            "--tp",
-            str(args.tp),
-        ]
-    )
-    if args.served_model_name:
-        cmd.extend(["--served-model-name", args.served_model_name])
-    if args.mem_fraction_static is not None:
-        cmd.extend(["--mem-fraction-static", str(args.mem_fraction_static)])
-    cmd.extend(args.sglang_arg)
-
+    cmd.extend([args.image, "-lc", KEEPALIVE_COMMAND])
     return cmd
 
 

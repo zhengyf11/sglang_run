@@ -1,10 +1,10 @@
 # sglang_run
 
-在标准的 SGLang 镜像容器中运行 SGLang 服务，并提供 p-d 分离 prefill 进程启动脚本。
+在标准的 SGLang 镜像中启动一个长期运行的 Docker 容器，并提供 p-d 分离 prefill 进程启动脚本。
 
 本仓库提供零第三方 Python 依赖的命令行脚本：
 
-- `run_sglang_container.py`：生成并执行 `docker run` 命令。镜像名、容器名、模型路径/模型 ID、端口映射、GPU、挂载目录、环境变量等常见动态字段都可以通过标准 `--key value` 形式传入。
+- `run_sglang_container.py`：生成并执行 `docker run` 命令，通过 `--entrypoint /bin/bash` 与 `tail -f /dev/null` 让容器长期运行，不启动任何 SGLang 进程。镜像名、容器名、GPU、共享内存、挂载目录、环境变量等容器层动态字段都可以通过标准 `--key value` 形式传入；网络固定使用 `--net=host`，不提供端口映射参数。
 - `run_sglang_prefill.py`：按 Issue #2 的 p-d 分离 prefill 配置启动 `python3 -m sglang.launch_server`，支持通过标准 `--key value` 形式覆盖模型、端口、并行度、disaggregation 与 NCCL 网络参数。
 
 ## 环境要求
@@ -21,8 +21,6 @@
 python run_sglang_container.py \
   --image lmsysorg/sglang:latest \
   --container-name sglang-qwen \
-  --model Qwen/Qwen2.5-7B-Instruct \
-  --port 30000 \
   --gpus all \
   --dry-run
 ```
@@ -33,15 +31,13 @@ python run_sglang_container.py \
 python run_sglang_container.py \
   --image lmsysorg/sglang:latest \
   --container-name sglang-qwen \
-  --model Qwen/Qwen2.5-7B-Instruct \
-  --port 30000 \
   --gpus all
 ```
 
 默认会生成类似命令：
 
 ```bash
-docker run --rm --name sglang-qwen --gpus all --shm-size 32g -p 30000:30000 lmsysorg/sglang:latest python3 -m sglang.launch_server --model-path Qwen/Qwen2.5-7B-Instruct --host 0.0.0.0 --port 30000 --tp 1
+docker run --rm --name sglang-qwen --gpus all --shm-size 32g --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
 ```
 
 ## 常用示例
@@ -52,32 +48,25 @@ docker run --rm --name sglang-qwen --gpus all --shm-size 32g -p 30000:30000 lmsy
 python run_sglang_container.py \
   --image lmsysorg/sglang:latest \
   --container-name sglang-local-model \
-  --model /models/qwen \
   --volume /data/models:/models:ro \
-  --host-port 18000 \
-  --container-port 30000 \
   --dry-run
 ```
 
-### 传入环境变量和额外 SGLang 参数
+### 传入环境变量和额外 Docker 参数
 
 ```bash
 python run_sglang_container.py \
-  --model Qwen/Qwen2.5-7B-Instruct \
   --env HF_TOKEN=your_token \
   --env HF_HOME=/root/.cache/huggingface \
   --volume /data/hf-cache:/root/.cache/huggingface \
-  --served-model-name qwen2.5 \
-  --tp 2 \
-  --mem-fraction-static 0.85 \
-  --sglang-arg --trust-remote-code
+  --docker-arg --ipc=host \
+  --dry-run
 ```
 
 ### 后台运行并保留退出后的容器
 
 ```bash
 python run_sglang_container.py \
-  --model Qwen/Qwen2.5-7B-Instruct \
   --container-name sglang-bg \
   --detach \
   --no-rm
@@ -87,7 +76,6 @@ python run_sglang_container.py \
 
 ```bash
 python run_sglang_container.py \
-  --model Qwen/Qwen2.5-7B-Instruct \
   --gpus none \
   --dry-run
 ```
@@ -96,22 +84,13 @@ python run_sglang_container.py \
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--model` | 必填 | 模型路径或模型 ID，传给 SGLang 的 `--model-path`。 |
 | `--image` | `lmsysorg/sglang:latest` | Docker 镜像名，可动态指定。 |
 | `--container-name` | `sglang` | Docker 容器名，可动态指定。 |
-| `--port` | `30000` | 默认服务端口；未指定 `--host-port`/`--container-port` 时同时用于二者。 |
-| `--host-port` | 同 `--port` | 宿主机端口。 |
-| `--container-port` | 同 `--port` | 容器内 SGLang 端口，同时传给 SGLang `--port`。 |
 | `--gpus` | `all` | Docker `--gpus` 值，例如 `all`、`device=0`；设为 `none` 时不添加 `--gpus`。 |
 | `--shm-size` | `32g` | Docker `--shm-size` 值。 |
-| `--host` | `0.0.0.0` | 容器内 SGLang 监听地址。 |
-| `--served-model-name` | 无 | 可选的 SGLang served model name。 |
-| `--tp` | `1` | Tensor parallel size，传给 SGLang `--tp`。 |
-| `--mem-fraction-static` | 无 | 可选的 SGLang `--mem-fraction-static`。 |
 | `--volume` | 可重复 | Docker volume 映射，格式 `HOST:CONTAINER[:MODE]`。 |
 | `--env` | 可重复 | Docker 环境变量，格式 `KEY=VALUE`。 |
 | `--docker-arg` | 可重复 | 追加到镜像名前的额外 Docker 参数。 |
-| `--sglang-arg` | 可重复 | 追加到 SGLang `launch_server` 后的额外参数。 |
 | `--detach` | `false` | 使用 `docker run -d` 后台运行。 |
 | `--rm` / `--no-rm` | `--rm` | 容器退出后是否自动删除。 |
 | `--dry-run` | `false` | 只打印命令，不执行 Docker。 |
