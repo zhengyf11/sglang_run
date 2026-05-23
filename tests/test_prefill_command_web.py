@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import unittest
+from pathlib import Path
 from unittest import mock
 
 import prefill_command_web
@@ -132,13 +133,25 @@ class HandlerTests(unittest.TestCase):
         handler.wfile = io.BytesIO()
         return handler
 
+    def _response(self, handler: prefill_command_web.PrefillCommandHandler) -> tuple[str, dict[str, str], bytes]:
+        raw_headers, body = handler.wfile.getvalue().split(b"\r\n\r\n", 1)
+        lines = raw_headers.decode("iso-8859-1").split("\r\n")
+        headers = dict(line.split(": ", 1) for line in lines[1:] if ": " in line)
+        return lines[0], headers, body
+
     def _json_response(self, handler: prefill_command_web.PrefillCommandHandler) -> dict[str, object]:
-        raw = handler.wfile.getvalue().split(b"\r\n\r\n", 1)[1]
-        return json.loads(raw.decode("utf-8"))
+        return json.loads(self._response(handler)[2].decode("utf-8"))
 
-    def test_get_root_returns_form_and_output_window(self) -> None:
-        html = prefill_command_web.render_index_html()
+    def test_get_root_returns_200_html_without_redirect(self) -> None:
+        handler = self._make_handler("GET", "/")
 
+        handler.do_GET()
+        status_line, headers, body = self._response(handler)
+        html = body.decode("utf-8")
+
+        self.assertIn("200", status_line)
+        self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
+        self.assertNotIn("Location", headers)
         self.assertIn("<form id=\"command-form\">", html)
         self.assertIn("Generated prefill shell command", html)
         self.assertIn("textarea id=\"command-output\"", html)
@@ -190,6 +203,14 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("No closing quotation", response)
 
 
+class GitignoreTests(unittest.TestCase):
+    def test_hidden_directories_are_ignored_while_gitignore_stays_tracked(self) -> None:
+        patterns = Path(".gitignore").read_text(encoding="utf-8").splitlines()
+
+        self.assertIn(".*/", patterns)
+        self.assertIn("!.gitignore", patterns)
+
+
 class MainSafetyTests(unittest.TestCase):
     def test_module_does_not_import_subprocess_or_expose_execution_endpoint(self) -> None:
         with open(prefill_command_web.__file__, encoding="utf-8") as source_file:
@@ -202,7 +223,20 @@ class MainSafetyTests(unittest.TestCase):
         self.assertNotIn("/run", source)
         self.assertNotIn("execute=true", source)
 
-    def test_main_serves_web_ui_without_running_prefill(self) -> None:
+    def test_default_cli_port_is_6000(self) -> None:
+        args = prefill_command_web.parse_args([])
+
+        self.assertEqual(args.host, "127.0.0.1")
+        self.assertEqual(args.port, 6000)
+
+    def test_main_serves_default_6000_web_ui_without_running_prefill(self) -> None:
+        with mock.patch.object(prefill_command_web, "run_server") as run_server_mock:
+            exit_code = prefill_command_web.main([])
+
+        self.assertEqual(exit_code, 0)
+        run_server_mock.assert_called_once_with("127.0.0.1", 6000)
+
+    def test_main_accepts_explicit_port_override(self) -> None:
         with mock.patch.object(prefill_command_web, "run_server") as run_server_mock:
             exit_code = prefill_command_web.main(["--host", "127.0.0.1", "--port", "9090"])
 

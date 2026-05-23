@@ -93,13 +93,13 @@ python run_sglang_container.py \
 启动 Web UI：
 
 ```bash
-python prefill_command_web.py --host 127.0.0.1 --port 8080
+python prefill_command_web.py --host 127.0.0.1 --port 6000
 ```
 
 打开：
 
 ```text
-http://127.0.0.1:8080/
+http://127.0.0.1:6000/
 ```
 
 页面和 API 只生成命令文本，不会启动 SGLang，不会设置 ulimit，不会清理当前进程环境，也不会调用 `subprocess.run`。
@@ -140,7 +140,7 @@ Web UI 使用以下本地接口：
 `POST /api/command` 示例：
 
 ```bash
-curl -s http://127.0.0.1:8080/api/command \
+curl -s http://127.0.0.1:6000/api/command \
   -H 'Content-Type: application/json' \
   -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","tensor_parallel_size":4,"extra_sglang_args":"--log-level debug"}'
 ```
