@@ -5,10 +5,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import mimetypes
 import shlex
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlparse
+
+DEFAULT_WEB_PORT = 6060
+WEB_DIR = Path(__file__).with_name("web")
 
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
@@ -74,30 +80,6 @@ COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("chunked_prefill_size", "--chunked-prefill-size"),
     ("max_prefill_tokens", "--max-prefill-tokens"),
 )
-
-FIELD_LABELS = {
-    "model_path": "Model path",
-    "served_model_name": "Served model name",
-    "tensor_parallel_size": "Tensor parallel size",
-    "tool_call_parser": "Tool call parser",
-    "reasoning_parser": "Reasoning parser",
-    "speculative_algorithm": "Speculative algorithm",
-    "speculative_num_steps": "Speculative num steps",
-    "speculative_eagle_topk": "Speculative EAGLE top-k",
-    "speculative_num_draft_tokens": "Speculative draft tokens",
-    "mem_fraction_static": "Mem fraction static",
-    "host": "SGLang host",
-    "port": "SGLang port",
-    "nnodes": "Number of nodes",
-    "node_rank": "Node rank",
-    "dist_init_addr": "Dist init address",
-    "disaggregation_mode": "Disaggregation mode",
-    "disaggregation_transfer_backend": "Disaggregation backend",
-    "disaggregation_ib_device": "Disaggregation IB device",
-    "max_running_requests": "Max running requests",
-    "chunked_prefill_size": "Chunked prefill size",
-    "max_prefill_tokens": "Max prefill tokens",
-}
 
 
 def _has_value(value: Any) -> bool:
@@ -174,100 +156,35 @@ def build_command_response(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def render_index_html() -> str:
-    defaults_json = json.dumps({**DEFAULTS, **NCCL_ENV_DEFAULTS}, ensure_ascii=False)
-    command_inputs = "\n".join(
-        f'<label>{FIELD_LABELS[field]}<input name="{field}" placeholder="{DEFAULTS[field]}"></label>'
-        for field, _ in COMMAND_FIELDS
-    )
-    nccl_inputs = "\n".join(
-        f'<label>{key}<input name="{key}" placeholder="{value}"></label>'
-        for key, value in NCCL_ENV_DEFAULTS.items()
-    )
-    return f"""<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SGLang Prefill Command Generator</title>
-  <style>
-    body {{ font-family: system-ui, sans-serif; margin: 2rem; background: #f7f7fb; color: #1f2937; }}
-    main {{ display: grid; grid-template-columns: minmax(320px, 1fr) minmax(360px, 1fr); gap: 1.5rem; }}
-    label {{ display: block; margin: .55rem 0; font-weight: 600; }}
-    input, textarea {{ box-sizing: border-box; width: 100%; margin-top: .2rem; padding: .45rem; }}
-    textarea.output {{ min-height: 18rem; font-family: ui-monospace, monospace; }}
-    section {{ background: white; border-radius: .75rem; padding: 1rem; box-shadow: 0 1px 8px #0001; }}
-    .checks label {{ display: inline-flex; gap: .4rem; align-items: center; margin-right: 1rem; }}
-    .checks input {{ width: auto; }}
-    .error {{ color: #b91c1c; white-space: pre-wrap; }}
-  </style>
-</head>
-<body>
-  <h1>SGLang Prefill Command Generator</h1>
-  <p>This local page generates a prefill shell command only. It does not start SGLang.</p>
-  <main>
-    <section>
-      <h2>Prefill options</h2>
-      <form id="command-form">
-        {command_inputs}
-        <div class="checks">
-          <label><input type="checkbox" name="trust_remote_code" checked> trust remote code</label>
-          <label><input type="checkbox" name="disable_cuda_graph" checked> disable CUDA graph</label>
-        </div>
-        <label>Extra SGLang args<textarea name="extra_sglang_args" placeholder="--log-level debug"></textarea></label>
-        <h3>NCCL environment exports</h3>
-        {nccl_inputs}
-      </form>
-    </section>
-    <section>
-      <h2>Generated prefill shell command</h2>
-      <textarea id="command-output" class="output" readonly></textarea>
-      <h2>Environment exports</h2>
-      <textarea id="env-output" class="output" readonly></textarea>
-      <p id="error" class="error"></p>
-    </section>
-  </main>
-  <script>
-    const defaults = {defaults_json};
-    const form = document.getElementById('command-form');
-    const commandOutput = document.getElementById('command-output');
-    const envOutput = document.getElementById('env-output');
-    const errorOutput = document.getElementById('error');
-    async function refreshCommand() {{
-      const data = {{}};
-      for (const element of form.elements) {{
-        if (!element.name) continue;
-        data[element.name] = element.type === 'checkbox' ? element.checked : element.value;
-      }}
-      try {{
-        const response = await fetch('/api/command', {{method: 'POST', headers: {{'Content-Type': 'application/json'}}, body: JSON.stringify(data)}});
-        const body = await response.json();
-        if (!response.ok) throw new Error(body.error || 'Failed to generate command');
-        commandOutput.value = body.shell_command;
-        envOutput.value = [...body.proxy_unsets, ...body.env_exports].join('\n');
-        errorOutput.textContent = '';
-      }} catch (error) {{ errorOutput.textContent = error.message; }}
-    }}
-    form.addEventListener('input', refreshCommand);
-    refreshCommand();
-  </script>
-</body>
-</html>"""
+def read_static_asset(path: str) -> tuple[bytes, str]:
+    """Read a Web UI asset from the local web directory."""
+    route = "index.html" if path in {"", "/"} else path.lstrip("/")
+    if route not in {"index.html", "styles.css", "app.js"}:
+        raise FileNotFoundError(path)
+    asset_path = WEB_DIR / route
+    content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+    if asset_path.suffix in {".html", ".css", ".js"}:
+        content_type = f"{content_type}; charset=utf-8"
+    return asset_path.read_bytes(), content_type
 
 
 class PrefillCommandHandler(BaseHTTPRequestHandler):
     server_version = "PrefillCommandWeb/1.0"
 
     def do_GET(self) -> None:
-        if self.path == "/":
-            self._write(HTTPStatus.OK, render_index_html(), "text/html; charset=utf-8")
-        elif self.path == "/api/defaults":
+        path = urlparse(self.path).path
+        if path == "/api/defaults":
             self._write_json(HTTPStatus.OK, {"defaults": {**DEFAULTS, **NCCL_ENV_DEFAULTS}})
-        else:
+            return
+        try:
+            body, content_type = read_static_asset(path)
+        except FileNotFoundError:
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
+            return
+        self._write_bytes(HTTPStatus.OK, body, content_type)
 
     def do_POST(self) -> None:
-        if self.path != "/api/command":
+        if urlparse(self.path).path != "/api/command":
             self._write_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
             return
         try:
@@ -292,18 +209,20 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
         self._write(status, json.dumps(data, ensure_ascii=False), "application/json; charset=utf-8")
 
     def _write(self, status: HTTPStatus, body: str, content_type: str) -> None:
-        encoded = body.encode("utf-8")
+        self._write_bytes(status, body.encode("utf-8"), content_type)
+
+    def _write_bytes(self, status: HTTPStatus, body: bytes, content_type: str) -> None:
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(encoded)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(encoded)
+        self.wfile.write(body)
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve a local Web UI that generates SGLang prefill commands.")
     parser.add_argument("--host", default="127.0.0.1", help="Host for the local command-generator Web UI.")
-    parser.add_argument("--port", type=int, default=6000, help="Port for the local command-generator Web UI.")
+    parser.add_argument("--port", type=int, default=DEFAULT_WEB_PORT, help="Port for the local command-generator Web UI.")
     return parser.parse_args(argv)
 
 

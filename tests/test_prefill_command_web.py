@@ -142,7 +142,7 @@ class HandlerTests(unittest.TestCase):
     def _json_response(self, handler: prefill_command_web.PrefillCommandHandler) -> dict[str, object]:
         return json.loads(self._response(handler)[2].decode("utf-8"))
 
-    def test_get_root_returns_200_html_without_redirect(self) -> None:
+    def test_get_root_returns_static_html_without_inline_application(self) -> None:
         handler = self._make_handler("GET", "/")
 
         handler.do_GET()
@@ -152,10 +152,37 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("200", status_line)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertNotIn("Location", headers)
-        self.assertIn("<form id=\"command-form\">", html)
-        self.assertIn("Generated prefill shell command", html)
-        self.assertIn("textarea id=\"command-output\"", html)
-        self.assertIn("/api/command", html)
+        self.assertIn("<form id=\"command-form\"", html)
+        self.assertIn("SGLang Prefill Command Generator", html)
+        self.assertIn("href=\"/styles.css\"", html)
+        self.assertIn("src=\"/app.js\"", html)
+        self.assertNotIn("<style>", html)
+        self.assertNotIn("<script>\n", html)
+
+    def test_get_static_css_and_js_assets(self) -> None:
+        for path, content_type, expected in (
+            ("/styles.css", "text/css; charset=utf-8", "--primary"),
+            ("/app.js", "application/javascript; charset=utf-8", "fetch('/api/command'"),
+        ):
+            with self.subTest(path=path):
+                handler = self._make_handler("GET", path)
+
+                handler.do_GET()
+                status_line, headers, body = self._response(handler)
+
+                self.assertIn("200", status_line)
+                self.assertEqual(headers["Content-Type"], content_type)
+                self.assertIn(expected, body.decode("utf-8"))
+
+    def test_unknown_static_path_returns_404(self) -> None:
+        handler = self._make_handler("GET", "/missing.js")
+
+        handler.do_GET()
+        status_line, headers, body = self._response(handler)
+
+        self.assertIn("404", status_line)
+        self.assertEqual(headers["Content-Type"], "application/json; charset=utf-8")
+        self.assertIn("not found", body.decode("utf-8"))
 
     def test_get_defaults_returns_default_config(self) -> None:
         handler = self._make_handler("GET", "/api/defaults")
@@ -223,18 +250,18 @@ class MainSafetyTests(unittest.TestCase):
         self.assertNotIn("/run", source)
         self.assertNotIn("execute=true", source)
 
-    def test_default_cli_port_is_6000(self) -> None:
+    def test_default_cli_port_is_6060(self) -> None:
         args = prefill_command_web.parse_args([])
 
         self.assertEqual(args.host, "127.0.0.1")
-        self.assertEqual(args.port, 6000)
+        self.assertEqual(args.port, 6060)
 
-    def test_main_serves_default_6000_web_ui_without_running_prefill(self) -> None:
+    def test_main_serves_default_6060_web_ui_without_running_prefill(self) -> None:
         with mock.patch.object(prefill_command_web, "run_server") as run_server_mock:
             exit_code = prefill_command_web.main([])
 
         self.assertEqual(exit_code, 0)
-        run_server_mock.assert_called_once_with("127.0.0.1", 6000)
+        run_server_mock.assert_called_once_with("127.0.0.1", 6060)
 
     def test_main_accepts_explicit_port_override(self) -> None:
         with mock.patch.object(prefill_command_web, "run_server") as run_server_mock:
