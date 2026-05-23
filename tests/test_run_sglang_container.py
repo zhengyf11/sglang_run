@@ -36,6 +36,7 @@ class ParseArgsTests(unittest.TestCase):
             ["--mem-fraction-static", "0.8"],
             ["--sglang-arg", "--trust-remote-code"],
             ["--detach"],
+            ["--gpus", "none"],
         ]
 
         for option in removed_options:
@@ -52,12 +53,23 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertEqual(cmd[:4], ["docker", "run", "--rm", "-d"])
         self.assertIn("--name", cmd)
         self.assertEqual(cmd[cmd.index("--name") + 1], "sglang")
-        self.assertIn("--gpus", cmd)
-        self.assertEqual(cmd[cmd.index("--gpus") + 1], "all")
         self.assertIn("--shm-size", cmd)
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "32g")
+        self.assertIn("--user=0", cmd)
         self.assertIn("--privileged", cmd)
-        self.assertIn("--net=host", cmd)
+        self.assertIn("--ipc=host", cmd)
+        self.assertIn("--network", cmd)
+        self.assertEqual(cmd[cmd.index("--network") + 1], "host")
+        self.assertIn("--runtime=nvidia", cmd)
+        self.assertIn("--gpus", cmd)
+        self.assertEqual(cmd[cmd.index("--gpus") + 1], "all")
+        self.assertIn("--ulimit", cmd)
+        self.assertEqual(cmd[cmd.index("--ulimit") + 1], "memlock=-1:-1")
+        self.assertIn("-v", cmd)
+        self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
+        self.assertIn("-e", cmd)
+        self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
+        self.assertNotIn("--net=host", cmd)
         self.assertIn("--entrypoint", cmd)
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertIn("lmsysorg/sglang:latest", cmd)
@@ -75,8 +87,6 @@ class BuildDockerCommandTests(unittest.TestCase):
                 "custom/sglang:test",
                 "--container-name",
                 "custom-name",
-                "--gpus",
-                "none",
                 "--shm-size",
                 "16g",
                 "--volume",
@@ -94,11 +104,18 @@ class BuildDockerCommandTests(unittest.TestCase):
 
         cmd = run_sglang_container.build_docker_command(args)
 
-        self.assertNotIn("--gpus", cmd)
+        self.assertIn("--gpus", cmd)
+        self.assertEqual(cmd[cmd.index("--gpus") + 1], "all")
         self.assertEqual(cmd[cmd.index("--name") + 1], "custom-name")
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "16g")
+        self.assertIn("--user=0", cmd)
         self.assertIn("--privileged", cmd)
-        self.assertIn("--net=host", cmd)
+        self.assertIn("--ipc=host", cmd)
+        self.assertEqual(cmd[cmd.index("--network") + 1], "host")
+        self.assertIn("--runtime=nvidia", cmd)
+        self.assertEqual(cmd[cmd.index("--ulimit") + 1], "memlock=-1:-1")
+        self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
+        self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertIn("-v", cmd)
         self.assertIn("/data/models:/models:ro", cmd)
