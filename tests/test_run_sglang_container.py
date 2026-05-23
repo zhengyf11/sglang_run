@@ -35,6 +35,7 @@ class ParseArgsTests(unittest.TestCase):
             ["--served-model-name", "qwen"],
             ["--mem-fraction-static", "0.8"],
             ["--sglang-arg", "--trust-remote-code"],
+            ["--detach"],
         ]
 
         for option in removed_options:
@@ -48,7 +49,7 @@ class BuildDockerCommandTests(unittest.TestCase):
 
         cmd = run_sglang_container.build_docker_command(args)
 
-        self.assertEqual(cmd[:3], ["docker", "run", "--rm"])
+        self.assertEqual(cmd[:4], ["docker", "run", "--rm", "-d"])
         self.assertIn("--name", cmd)
         self.assertEqual(cmd[cmd.index("--name") + 1], "sglang")
         self.assertIn("--gpus", cmd)
@@ -108,8 +109,8 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertNotIn("-p", cmd)
         self.assertNotIn("sglang.launch_server", cmd)
 
-    def test_detach_and_no_rm_options(self) -> None:
-        args = run_sglang_container.parse_args(["--detach", "--no-rm"])
+    def test_no_rm_keeps_default_detached_mode(self) -> None:
+        args = run_sglang_container.parse_args(["--no-rm"])
 
         cmd = run_sglang_container.build_docker_command(args)
 
