@@ -4,7 +4,7 @@
 
 本仓库提供零第三方 Python 依赖的命令行脚本：
 
-- `run_sglang_container.py`：生成并执行 `docker run` 命令，默认添加 `--privileged` 给容器超级权限，并通过 `--entrypoint /bin/bash` 与 `tail -f /dev/null` 让容器长期运行，不启动任何 SGLang 进程。镜像名、容器名、GPU、共享内存、挂载目录、环境变量等容器层动态字段都可以通过标准 `--key value` 形式传入；网络固定使用 `--net=host`，不提供端口映射参数。
+- `run_sglang_container.py`：生成并执行 `docker run` 命令，默认添加 root 用户、特权模式、host IPC/网络、NVIDIA runtime/GPU、memlock ulimit、cgroup 只读挂载与 `NVIDIA_VISIBLE_DEVICES=all`，并通过 `--entrypoint /bin/bash` 与 `tail -f /dev/null` 让容器长期运行，不启动任何 SGLang 进程。镜像名、容器名、共享内存、额外挂载目录、额外环境变量等容器层动态字段都可以通过标准 `--key value` 形式传入；网络固定使用 `--network host`，不提供端口映射参数。
 - `run_sglang_prefill.py`：按 Issue #2 的 p-d 分离 prefill 配置启动 `python3 -m sglang.launch_server`，支持通过标准 `--key value` 形式覆盖模型、端口、并行度、disaggregation 与 NCCL 网络参数。
 
 ## 环境要求
@@ -21,7 +21,6 @@
 python run_sglang_container.py \
   --image lmsysorg/sglang:latest \
   --container-name sglang-qwen \
-  --gpus all \
   --dry-run
 ```
 
@@ -30,14 +29,13 @@ python run_sglang_container.py \
 ```bash
 python run_sglang_container.py \
   --image lmsysorg/sglang:latest \
-  --container-name sglang-qwen \
-  --gpus all
+  --container-name sglang-qwen
 ```
 
-默认会生成后台运行并带超级权限的类似命令（脚本始终添加 `-d` 和 `--privileged`，不需要额外参数）：
+默认会生成后台运行并带固定容器运行参数的类似命令（脚本始终添加 `-d`、root 用户、特权模式、host IPC/网络、NVIDIA runtime/GPU、memlock ulimit、cgroup 只读挂载和 `NVIDIA_VISIBLE_DEVICES=all`，不需要额外参数）：
 
 ```bash
-docker run --rm -d --name sglang-qwen --gpus all --shm-size 32g --privileged --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
+docker run --rm -d --name sglang-qwen --shm-size 32g --user=0 --privileged --ipc=host --network host --runtime=nvidia --gpus all --ulimit memlock=-1:-1 -v /sys/fs/cgroup:/sys/fs/cgroup:ro -e NVIDIA_VISIBLE_DEVICES=all --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
 ```
 
 ## 常用示例
@@ -52,14 +50,14 @@ python run_sglang_container.py \
   --dry-run
 ```
 
-### 传入环境变量和额外 Docker 参数
+### 传入额外环境变量、挂载和 Docker 参数
 
 ```bash
 python run_sglang_container.py \
   --env HF_TOKEN=your_token \
   --env HF_HOME=/root/.cache/huggingface \
   --volume /data/hf-cache:/root/.cache/huggingface \
-  --docker-arg --ipc=host \
+  --docker-arg --log-level=debug \
   --dry-run
 ```
 
@@ -73,13 +71,6 @@ python run_sglang_container.py \
   --no-rm
 ```
 
-### CPU 或不透传 GPU
-
-```bash
-python run_sglang_container.py \
-  --gpus none \
-  --dry-run
-```
 
 ## 参数说明
 
@@ -87,12 +78,11 @@ python run_sglang_container.py \
 | --- | --- | --- |
 | `--image` | `lmsysorg/sglang:latest` | Docker 镜像名，可动态指定。 |
 | `--container-name` | `sglang` | Docker 容器名，可动态指定。 |
-| `--gpus` | `all` | Docker `--gpus` 值，例如 `all`、`device=0`；设为 `none` 时不添加 `--gpus`。 |
 | `--shm-size` | `32g` | Docker `--shm-size` 值。 |
 | `--volume` | 可重复 | Docker volume 映射，格式 `HOST:CONTAINER[:MODE]`。 |
 | `--env` | 可重复 | Docker 环境变量，格式 `KEY=VALUE`。 |
 | `--docker-arg` | 可重复 | 追加到镜像名前的额外 Docker 参数。 |
-| 固定 Docker 参数 | `--privileged --net=host --entrypoint /bin/bash` | 脚本默认给容器超级权限，固定使用 host 网络，并用 bash 执行保活命令。 |
+| 固定 Docker 参数 | `--user=0 --privileged --ipc=host --network host --runtime=nvidia --gpus all --ulimit memlock=-1:-1 -v /sys/fs/cgroup:/sys/fs/cgroup:ro -e NVIDIA_VISIBLE_DEVICES=all --entrypoint /bin/bash` | 脚本默认使用 root 用户、特权模式、host IPC/网络、NVIDIA runtime/GPU、memlock ulimit、cgroup 只读挂载，并用 bash 执行保活命令。 |
 | `--rm` / `--no-rm` | `--rm` | 容器退出后是否自动删除；容器始终使用 `docker run -d` 后台运行。 |
 | `--dry-run` | `false` | 只打印命令，不执行 Docker。 |
 

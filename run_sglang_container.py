@@ -60,11 +60,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_CONTAINER_NAME,
         help=f"Docker container name. Defaults to {DEFAULT_CONTAINER_NAME}.",
     )
-    docker_group.add_argument(
-        "--gpus",
-        default="all",
-        help="Docker --gpus value, for example: all, device=0, or none. Defaults to all.",
-    )
+
     docker_group.add_argument(
         "--shm-size",
         default=DEFAULT_SHM_SIZE,
@@ -114,12 +110,29 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
     cmd.append("-d")
     if args.container_name:
         cmd.extend(["--name", args.container_name])
-    if args.gpus and args.gpus.lower() != "none":
-        cmd.extend(["--gpus", args.gpus])
     if args.shm_size:
         cmd.extend(["--shm-size", args.shm_size])
 
-    cmd.extend(["--privileged", "--net=host", "--entrypoint", "/bin/bash"])
+    cmd.extend(
+        [
+            "--user=0",
+            "--privileged",
+            "--ipc=host",
+            "--network",
+            "host",
+            "--runtime=nvidia",
+            "--gpus",
+            "all",
+            "--ulimit",
+            "memlock=-1:-1",
+            "-v",
+            "/sys/fs/cgroup:/sys/fs/cgroup:ro",
+            "-e",
+            "NVIDIA_VISIBLE_DEVICES=all",
+            "--entrypoint",
+            "/bin/bash",
+        ]
+    )
 
     for volume in args.volume:
         cmd.extend(["-v", volume])
