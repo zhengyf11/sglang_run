@@ -34,10 +34,10 @@ python run_sglang_container.py \
   --gpus all
 ```
 
-默认会生成类似命令：
+默认会生成后台运行的类似命令（脚本始终添加 `-d`，不需要额外参数）：
 
 ```bash
-docker run --rm --name sglang-qwen --gpus all --shm-size 32g --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
+docker run --rm -d --name sglang-qwen --gpus all --shm-size 32g --net=host --entrypoint /bin/bash lmsysorg/sglang:latest -lc 'tail -f /dev/null'
 ```
 
 ## 常用示例
@@ -63,12 +63,13 @@ python run_sglang_container.py \
   --dry-run
 ```
 
-### 后台运行并保留退出后的容器
+### 保留退出后的后台容器
+
+容器默认使用 `docker run -d` 后台运行；如需保留退出后的容器，可搭配 `--no-rm`：
 
 ```bash
 python run_sglang_container.py \
   --container-name sglang-bg \
-  --detach \
   --no-rm
 ```
 
@@ -91,8 +92,7 @@ python run_sglang_container.py \
 | `--volume` | 可重复 | Docker volume 映射，格式 `HOST:CONTAINER[:MODE]`。 |
 | `--env` | 可重复 | Docker 环境变量，格式 `KEY=VALUE`。 |
 | `--docker-arg` | 可重复 | 追加到镜像名前的额外 Docker 参数。 |
-| `--detach` | `false` | 使用 `docker run -d` 后台运行。 |
-| `--rm` / `--no-rm` | `--rm` | 容器退出后是否自动删除。 |
+| `--rm` / `--no-rm` | `--rm` | 容器退出后是否自动删除；容器始终使用 `docker run -d` 后台运行。 |
 | `--dry-run` | `false` | 只打印命令，不执行 Docker。 |
 
 ## p-d 分离 prefill 进程启动

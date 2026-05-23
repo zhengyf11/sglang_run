@@ -71,11 +71,6 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help=f"Docker --shm-size value. Defaults to {DEFAULT_SHM_SIZE}.",
     )
     docker_group.add_argument(
-        "--detach",
-        action="store_true",
-        help="Run the container in the background with docker run -d.",
-    )
-    docker_group.add_argument(
         "--rm",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -116,8 +111,7 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
     cmd = ["docker", "run"]
     if args.rm:
         cmd.append("--rm")
-    if args.detach:
-        cmd.append("-d")
+    cmd.append("-d")
     if args.container_name:
         cmd.extend(["--name", args.container_name])
     if args.gpus and args.gpus.lower() != "none":
