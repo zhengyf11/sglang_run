@@ -303,7 +303,7 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve a local Web UI that generates SGLang prefill commands.")
     parser.add_argument("--host", default="127.0.0.1", help="Host for the local command-generator Web UI.")
-    parser.add_argument("--port", type=int, default=8080, help="Port for the local command-generator Web UI.")
+    parser.add_argument("--port", type=int, default=6000, help="Port for the local command-generator Web UI.")
     return parser.parse_args(argv)
 
 
