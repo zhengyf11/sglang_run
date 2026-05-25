@@ -47,8 +47,6 @@ const form = document.querySelector('#command-form');
 const statusDot = document.querySelector('#status-dot');
 const statusText = document.querySelector('#status-text');
 const errorBox = document.querySelector('#error-box');
-const commandOutput = document.querySelector('#command-output');
-const envOutput = document.querySelector('#env-output');
 const combinedOutput = document.querySelector('#combined-output');
 const resetButton = document.querySelector('#reset-button');
 
@@ -136,8 +134,6 @@ async function refreshCommand() {
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || 'Failed to generate command');
 
-    commandOutput.textContent = body.shell_command;
-    envOutput.textContent = [...body.proxy_unsets, ...body.env_exports].join('\n');
     combinedOutput.textContent = body.combined_shell;
     showError('');
     setStatus('Command preview ready', 'ready');
