@@ -2,7 +2,6 @@ const fieldGroups = {
   model: [
     { name: 'model_path', label: 'Model path', wide: true },
     { name: 'served_model_name', label: 'Served model name' },
-    { name: 'tensor_parallel_size', label: 'Tensor parallel size', type: 'number' },
     { name: 'tool_call_parser', label: 'Tool call parser' },
     { name: 'reasoning_parser', label: 'Reasoning parser' },
   ],
@@ -53,6 +52,8 @@ const combinedOutput = document.querySelector('#combined-output');
 const resetButton = document.querySelector('#reset-button');
 const enableMtpInput = document.querySelector('#enable-mtp');
 const mtpFields = document.querySelector('#mtp-fields');
+const attentionModeInputs = Array.from(document.querySelectorAll('input[name="attention_parallel_mode"]'));
+const contextBackendOptions = document.querySelector('#context-backend-options');
 
 function createField({ name, label, type = 'text', wide = false }) {
   const wrapper = document.createElement('label');
@@ -95,6 +96,15 @@ function updateMtpVisibility() {
   }
 }
 
+function updateContextBackendVisibility() {
+  const selectedMode = attentionModeInputs.find((input) => input.checked)?.value;
+  const visible = selectedMode === 'context_parallel';
+  contextBackendOptions.hidden = !visible;
+  for (const element of contextBackendOptions.querySelectorAll('input')) {
+    element.disabled = !visible;
+  }
+}
+
 function setStatus(message, tone = 'loading') {
   statusText.textContent = message;
   statusDot.className = `status-dot ${tone === 'ready' ? 'ready' : tone === 'error' ? 'error' : ''}`.trim();
@@ -116,6 +126,8 @@ function applyDefaults() {
     const value = state.defaults[element.name];
     if (element.type === 'checkbox') {
       element.checked = Boolean(value);
+    } else if (element.type === 'radio') {
+      element.checked = element.value === String(value ?? '');
     } else {
       element.value = value ?? '';
       element.placeholder = value ?? '';
@@ -127,12 +139,14 @@ function applyDefaults() {
     hint.textContent = value === undefined ? '' : `Default: ${value}`;
   }
   updateMtpVisibility();
+  updateContextBackendVisibility();
 }
 
 function collectPayload() {
   const payload = {};
   for (const element of form.elements) {
     if (!element.name || element.disabled) continue;
+    if (element.type === 'radio' && !element.checked) continue;
     payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
   }
   return payload;
@@ -195,6 +209,7 @@ async function copyOutput(targetId, button) {
 renderFields();
 form.addEventListener('input', (event) => {
   if (event.target === enableMtpInput) updateMtpVisibility();
+  if (attentionModeInputs.includes(event.target)) updateContextBackendVisibility();
   scheduleRefresh();
 });
 resetButton.addEventListener('click', () => {

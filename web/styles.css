@@ -182,6 +182,71 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.parallel-grid {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.55fr) minmax(0, 1.7fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.parallel-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.parallel-label {
+  margin: 0;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.radio-grid,
+.context-backend-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.context-backend-options {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.context-backend-options .hint {
+  grid-column: 1 / -1;
+  font-weight: 800;
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.radio-option input {
+  width: auto;
+  accent-color: var(--primary);
+}
+
+.moe-radio-grid {
+  grid-template-columns: 1fr;
+}
+
 .mtp-field-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
@@ -340,6 +405,16 @@ textarea {
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
+  .parallel-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .radio-grid,
+  .context-backend-options,
+  .moe-radio-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .output-panel {
     position: static;
   }
@@ -357,7 +432,10 @@ textarea {
   }
 
   .field-grid,
-  .mtp-field-grid {
+  .mtp-field-grid,
+  .radio-grid,
+  .context-backend-options,
+  .moe-radio-grid {
     grid-template-columns: 1fr;
   }
 

@@ -112,13 +112,18 @@ http://127.0.0.1:6060/
 
 - `--model-path /mnt/GLM-5.1-FP8`
 - `--served-model-name GLM-5.1-FP8`
-- `--tensor-parallel-size 8`
+- `--tp-size 8`
 - `--host 0.0.0.0 --port 30000`
 - `--disaggregation-mode prefill`
 - `--disaggregation-transfer-backend mooncake`
 - `--disaggregation-ib-device mlx5_bond_0,...,mlx5_bond_7`
 - `--trust-remote-code --disable-cuda-graph`
 - `--max-running-requests 128 --chunked-prefill-size 8192 --max-prefill-tokens 65536`
+
+Parallel 分组会根据 Attention/MoE 阶段单选项自动补齐固定参数，不需要在 Extra SGLang args 中手填：
+
+- Attention：Tensor parallel 生成 `--tp-size <N>`；DP attention 额外生成 `--dp-size <N> --enable-dp-attention`；Context parallel 可在 `--enable-nsa-prefill-context-parallel` 与 `--enable-prefill-context-parallel` 中二选一，并自动生成 `--nsa-prefill-cp-mode in-seq-split --enable-two-batch-overlap`；Pipeline parallel 生成 `--tp-size 1 --pp-size <N> --enable-dynamic-chunking`，Full shell 中会提示 `#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8`。
+- MoE：Tensor parallel 自动生成 `--enable-single-batch-overlap --enable-two-batch-overlap`；Expert parallel 额外生成 `--ep-size=<N> --moe-a2a-backend deepep`。
 
 页面也会生成 NCCL export 和代理环境变量 unset 提示，供人工复制使用：
 
@@ -144,7 +149,7 @@ Web UI 使用以下本地接口：
 ```bash
 curl -s http://127.0.0.1:6060/api/command \
   -H 'Content-Type: application/json' \
-  -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","tensor_parallel_size":4,"extra_sglang_args":"--log-level debug"}'
+  -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","parallel_tp_size":4,"extra_sglang_args":"--log-level debug"}'
 ```
 
 额外 SGLang 参数在页面的 `Extra SGLang args` 文本框填写，后端使用 `shlex.split()` 解析并追加到命令末尾；无法解析时 API 返回 400，不生成错误命令。

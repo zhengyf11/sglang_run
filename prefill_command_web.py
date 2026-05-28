@@ -19,7 +19,10 @@ WEB_DIR = Path(__file__).with_name("web")
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
     "served_model_name": "GLM-5.1-FP8",
-    "tensor_parallel_size": 8,
+    "parallel_tp_size": 8,
+    "attention_parallel_mode": "tensor",
+    "context_parallel_backend": "nsa",
+    "moe_parallel_mode": "tensor",
     "tool_call_parser": "glm47",
     "reasoning_parser": "glm45",
     "enable_mtp": False,
@@ -68,7 +71,6 @@ MTP_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
 COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("model_path", "--model-path"),
     ("served_model_name", "--served-model-name"),
-    ("tensor_parallel_size", "--tensor-parallel-size"),
     ("tool_call_parser", "--tool-call-parser"),
     ("reasoning_parser", "--reasoning-parser"),
     ("mem_fraction_static", "--mem-fraction-static"),
@@ -123,11 +125,57 @@ def parse_extra_sglang_args(value: Any) -> list[str]:
     return shlex.split(value)
 
 
+def _append_unique_flag(cmd: list[str], flag: str) -> None:
+    if flag not in cmd:
+        cmd.append(flag)
+
+
+def build_parallel_args(config: Mapping[str, Any]) -> list[str]:
+    """Build SGLang parallel arguments from the dedicated Parallel UI group."""
+    tp_size = str(config["parallel_tp_size"])
+    cmd: list[str] = []
+
+    attention_mode = str(config.get("attention_parallel_mode", "tensor"))
+    if attention_mode == "tensor":
+        cmd.extend(["--tp-size", tp_size])
+    elif attention_mode == "dp_attention":
+        cmd.extend(["--tp-size", tp_size, "--dp-size", tp_size, "--enable-dp-attention"])
+    elif attention_mode == "context_parallel":
+        cmd.extend(["--tp-size", tp_size])
+        backend = str(config.get("context_parallel_backend", "nsa"))
+        if backend == "prefill":
+            cmd.append("--enable-prefill-context-parallel")
+        else:
+            cmd.append("--enable-nsa-prefill-context-parallel")
+        cmd.extend(["--nsa-prefill-cp-mode", "in-seq-split"])
+        _append_unique_flag(cmd, "--enable-two-batch-overlap")
+    elif attention_mode == "pipeline_parallel":
+        cmd.extend(["--tp-size", "1", "--pp-size", tp_size, "--enable-dynamic-chunking"])
+    else:
+        raise ValueError(f"unsupported attention_parallel_mode: {attention_mode}")
+
+    moe_mode = str(config.get("moe_parallel_mode", "tensor"))
+    if moe_mode == "tensor":
+        _append_unique_flag(cmd, "--enable-single-batch-overlap")
+        _append_unique_flag(cmd, "--enable-two-batch-overlap")
+    elif moe_mode == "expert_parallel":
+        cmd.append(f"--ep-size={tp_size}")
+        cmd.extend(["--moe-a2a-backend", "deepep"])
+        _append_unique_flag(cmd, "--enable-single-batch-overlap")
+        _append_unique_flag(cmd, "--enable-two-batch-overlap")
+    else:
+        raise ValueError(f"unsupported moe_parallel_mode: {moe_mode}")
+
+    return cmd
+
+
 def build_prefill_command(config: Mapping[str, Any]) -> list[str]:
     """Build a launch_server command list only; this module never executes it."""
     cmd = ["python3", "-m", "sglang.launch_server"]
     for field, flag in COMMAND_FIELDS:
         cmd.extend([flag, str(config[field])])
+        if field == "served_model_name":
+            cmd.extend(build_parallel_args(config))
     if config.get("enable_mtp"):
         for field, flag in MTP_COMMAND_FIELDS:
             cmd.extend([flag, str(config[field])])
@@ -166,10 +214,17 @@ def build_env_exports(config: Mapping[str, Any]) -> list[str]:
     return [f"export {key}={shlex.quote(str(config[key]))}" for key in NCCL_ENV_DEFAULTS]
 
 
+def build_shell_hints(config: Mapping[str, Any]) -> list[str]:
+    if config.get("attention_parallel_mode") == "pipeline_parallel":
+        return ["#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8"]
+    return []
+
+
 def build_command_response(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     config = normalize_form_payload(payload)
     command = build_prefill_command(config)
     env_exports = build_env_exports(config)
+    shell_hints = build_shell_hints(config)
     proxy_unsets = [f"unset {key}" for key in PROXY_ENV_VARS]
     shell_command = build_shell_command(command)
     return {
@@ -177,8 +232,9 @@ def build_command_response(payload: Mapping[str, Any] | None) -> dict[str, Any]:
         "command": command,
         "shell_command": shell_command,
         "env_exports": env_exports,
+        "shell_hints": shell_hints,
         "proxy_unsets": proxy_unsets,
-        "combined_shell": "\n".join([*proxy_unsets, *env_exports, shell_command]),
+        "combined_shell": "\n".join([*proxy_unsets, *env_exports, *shell_hints, shell_command]),
         "executed": False,
     }
 

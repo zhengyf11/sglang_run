@@ -17,7 +17,9 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[:3], ["python3", "-m", "sglang.launch_server"])
         self.assertEqual(cmd[cmd.index("--model-path") + 1], "/mnt/GLM-5.1-FP8")
         self.assertEqual(cmd[cmd.index("--served-model-name") + 1], "GLM-5.1-FP8")
-        self.assertEqual(cmd[cmd.index("--tensor-parallel-size") + 1], "8")
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "8")
+        self.assertEqual(cmd.count("--tp-size"), 1)
+        self.assertNotIn("--tensor-parallel-size", cmd)
         self.assertEqual(cmd[cmd.index("--tool-call-parser") + 1], "glm47")
         self.assertEqual(cmd[cmd.index("--reasoning-parser") + 1], "glm45")
         self.assertNotIn("--speculative-algorithm", cmd)
@@ -50,7 +52,7 @@ class CommandGenerationTests(unittest.TestCase):
             {
                 "model_path": "/mnt/GLM-5.1-FP8",
                 "served_model_name": "GLM-5.1-FP8",
-                "tensor_parallel_size": 8,
+                "parallel_tp_size": 8,
             }
         )
 
@@ -59,7 +61,7 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(shell_lines[0], "python3 -m sglang.launch_server \\")
         self.assertEqual(shell_lines[1], "\t--model-path /mnt/GLM-5.1-FP8 \\")
         self.assertEqual(shell_lines[2], "\t--served-model-name GLM-5.1-FP8 \\")
-        self.assertEqual(shell_lines[3], "\t--tensor-parallel-size 8 \\")
+        self.assertEqual(shell_lines[3], "\t--tp-size 8 \\")
         self.assertTrue(all(line.endswith(" \\") for line in shell_lines[:-1]))
         self.assertFalse(shell_lines[-1].endswith("\\"))
         self.assertEqual(
@@ -72,19 +74,22 @@ class CommandGenerationTests(unittest.TestCase):
                 "/mnt/GLM-5.1-FP8",
                 "--served-model-name",
                 "GLM-5.1-FP8",
-                "--tensor-parallel-size",
+                "--tp-size",
                 "8",
             ],
         )
 
     def test_blank_missing_and_none_fields_use_defaults(self) -> None:
         config = prefill_command_web.normalize_form_payload(
-            {"model_path": "", "served_model_name": None, "tensor_parallel_size": "  "}
+            {"model_path": "", "served_model_name": None, "parallel_tp_size": "  "}
         )
 
         self.assertEqual(config["model_path"], "/mnt/GLM-5.1-FP8")
         self.assertEqual(config["served_model_name"], "GLM-5.1-FP8")
-        self.assertEqual(config["tensor_parallel_size"], 8)
+        self.assertEqual(config["parallel_tp_size"], 8)
+        self.assertEqual(config["attention_parallel_mode"], "tensor")
+        self.assertEqual(config["context_parallel_backend"], "nsa")
+        self.assertEqual(config["moe_parallel_mode"], "tensor")
         self.assertEqual(config["port"], 30000)
 
     def test_dynamic_parameters_override_defaults(self) -> None:
@@ -92,7 +97,7 @@ class CommandGenerationTests(unittest.TestCase):
             {
                 "model_path": "/models/custom",
                 "served_model_name": "custom-model",
-                "tensor_parallel_size": 2,
+                "parallel_tp_size": 2,
                 "host": "127.0.0.1",
                 "port": 31000,
                 "nnodes": 2,
@@ -110,7 +115,8 @@ class CommandGenerationTests(unittest.TestCase):
 
         self.assertEqual(cmd[cmd.index("--model-path") + 1], "/models/custom")
         self.assertEqual(cmd[cmd.index("--served-model-name") + 1], "custom-model")
-        self.assertEqual(cmd[cmd.index("--tensor-parallel-size") + 1], "2")
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "2")
+        self.assertNotIn("--tensor-parallel-size", cmd)
         self.assertEqual(cmd[cmd.index("--host") + 1], "127.0.0.1")
         self.assertEqual(cmd[cmd.index("--port") + 1], "31000")
         self.assertEqual(cmd[cmd.index("--nnodes") + 1], "2")
@@ -122,6 +128,76 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "64")
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "4096")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "32768")
+
+    def test_attention_dp_parallel_adds_required_flags(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {"parallel_tp_size": 8, "attention_parallel_mode": "dp_attention"}
+        )["command"]
+
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "8")
+        self.assertEqual(cmd[cmd.index("--dp-size") + 1], "8")
+        self.assertIn("--enable-dp-attention", cmd)
+
+    def test_context_parallel_selects_backend_and_deduplicates_overlap(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {
+                "parallel_tp_size": 8,
+                "attention_parallel_mode": "context_parallel",
+                "context_parallel_backend": "prefill",
+                "moe_parallel_mode": "expert_parallel",
+            }
+        )["command"]
+
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "8")
+        self.assertIn("--enable-prefill-context-parallel", cmd)
+        self.assertNotIn("--enable-nsa-prefill-context-parallel", cmd)
+        self.assertEqual(cmd[cmd.index("--nsa-prefill-cp-mode") + 1], "in-seq-split")
+        self.assertEqual(cmd.count("--tp-size"), 1)
+        self.assertEqual(cmd.count("--enable-two-batch-overlap"), 1)
+        self.assertIn("--ep-size=8", cmd)
+        self.assertEqual(cmd[cmd.index("--moe-a2a-backend") + 1], "deepep")
+        self.assertIn("--enable-single-batch-overlap", cmd)
+
+    def test_moe_tensor_parallel_adds_overlap_flags_without_repeating_tp(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {"parallel_tp_size": 8, "moe_parallel_mode": "tensor"}
+        )["command"]
+
+        self.assertEqual(cmd.count("--tp-size"), 1)
+        self.assertNotIn("--ep-size=8", cmd)
+        self.assertNotIn("--moe-a2a-backend", cmd)
+        self.assertIn("--enable-single-batch-overlap", cmd)
+        self.assertEqual(cmd.count("--enable-two-batch-overlap"), 1)
+
+    def test_moe_expert_parallel_adds_expert_flags_without_repeating_tp(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {"parallel_tp_size": 8, "moe_parallel_mode": "expert_parallel"}
+        )["command"]
+
+        self.assertEqual(cmd.count("--tp-size"), 1)
+        self.assertIn("--ep-size=8", cmd)
+        self.assertEqual(cmd[cmd.index("--moe-a2a-backend") + 1], "deepep")
+        self.assertIn("--enable-single-batch-overlap", cmd)
+        self.assertEqual(cmd.count("--enable-two-batch-overlap"), 1)
+
+    def test_context_parallel_defaults_to_nsa_backend(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {"attention_parallel_mode": "context_parallel"}
+        )["command"]
+
+        self.assertIn("--enable-nsa-prefill-context-parallel", cmd)
+        self.assertNotIn("--enable-prefill-context-parallel", cmd)
+
+    def test_pipeline_parallel_adds_dynamic_chunking_shell_hint(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {"parallel_tp_size": 8, "attention_parallel_mode": "pipeline_parallel"}
+        )
+        cmd = response["command"]
+
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--pp-size") + 1], "8")
+        self.assertIn("--enable-dynamic-chunking", cmd)
+        self.assertIn("#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8", response["combined_shell"])
 
     def test_mtp_parameters_are_omitted_until_enabled(self) -> None:
         response = prefill_command_web.build_command_response(
@@ -311,6 +387,32 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("mtpFields.hidden = !enabled;", js)
         self.assertIn("element.disabled = !enabled;", js)
         self.assertIn("if (event.target === enableMtpInput) updateMtpVisibility();", js)
+
+    def test_parallel_section_uses_radio_groups_and_hides_context_backend_until_selected(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="parallel-heading"', html)
+        self.assertIn('name="parallel_tp_size"', html)
+        self.assertIn('name="attention_parallel_mode"', html)
+        self.assertIn('value="dp_attention"', html)
+        self.assertIn('value="context_parallel"', html)
+        self.assertIn('value="pipeline_parallel"', html)
+        self.assertIn('name="context_parallel_backend"', html)
+        self.assertIn('id="context-backend-options" hidden', html)
+        self.assertIn('name="moe_parallel_mode"', html)
+        self.assertIn("updateContextBackendVisibility", js)
+        self.assertNotIn("tensor_parallel_size", js)
+
+
+class ReadmeDocumentationTests(unittest.TestCase):
+    def test_readme_documents_parallel_tp_size_without_old_tensor_parallel_field(self) -> None:
+        readme = Path("README.md").read_text(encoding="utf-8")
+
+        self.assertIn("--tp-size 8", readme)
+        self.assertIn('"parallel_tp_size":4', readme)
+        self.assertNotIn("--tensor-parallel-size", readme)
+        self.assertNotIn("tensor_parallel_size", readme)
 
 
 class GitignoreTests(unittest.TestCase):
