@@ -22,6 +22,7 @@ DEFAULTS: dict[str, Any] = {
     "tensor_parallel_size": 8,
     "tool_call_parser": "glm47",
     "reasoning_parser": "glm45",
+    "enable_mtp": False,
     "speculative_algorithm": "EAGLE",
     "speculative_num_steps": 3,
     "speculative_eagle_topk": 1,
@@ -57,16 +58,19 @@ PROXY_ENV_VARS = (
     "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY",
 )
 
+MTP_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
+    ("speculative_algorithm", "--speculative-algorithm"),
+    ("speculative_num_steps", "--speculative-num-steps"),
+    ("speculative_eagle_topk", "--speculative-eagle-topk"),
+    ("speculative_num_draft_tokens", "--speculative-num-draft-tokens"),
+)
+
 COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("model_path", "--model-path"),
     ("served_model_name", "--served-model-name"),
     ("tensor_parallel_size", "--tensor-parallel-size"),
     ("tool_call_parser", "--tool-call-parser"),
     ("reasoning_parser", "--reasoning-parser"),
-    ("speculative_algorithm", "--speculative-algorithm"),
-    ("speculative_num_steps", "--speculative-num-steps"),
-    ("speculative_eagle_topk", "--speculative-eagle-topk"),
-    ("speculative_num_draft_tokens", "--speculative-num-draft-tokens"),
     ("mem_fraction_static", "--mem-fraction-static"),
     ("host", "--host"),
     ("port", "--port"),
@@ -100,6 +104,7 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """Apply Issue #2 defaults when fields are omitted, blank, or null."""
     raw = {} if payload is None else dict(payload)
     config = {key: (raw[key] if _has_value(raw.get(key)) else value) for key, value in DEFAULTS.items()}
+    config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
     config["trust_remote_code"] = _to_bool(raw.get("trust_remote_code"), DEFAULTS["trust_remote_code"])
     config["disable_cuda_graph"] = _to_bool(raw.get("disable_cuda_graph"), DEFAULTS["disable_cuda_graph"])
     for env_key, default in NCCL_ENV_DEFAULTS.items():
@@ -123,6 +128,9 @@ def build_prefill_command(config: Mapping[str, Any]) -> list[str]:
     cmd = ["python3", "-m", "sglang.launch_server"]
     for field, flag in COMMAND_FIELDS:
         cmd.extend([flag, str(config[field])])
+    if config.get("enable_mtp"):
+        for field, flag in MTP_COMMAND_FIELDS:
+            cmd.extend([flag, str(config[field])])
     if config.get("trust_remote_code"):
         cmd.append("--trust-remote-code")
     if config.get("disable_cuda_graph"):
@@ -182,6 +190,8 @@ def read_static_asset(path: str) -> tuple[bytes, str]:
         raise FileNotFoundError(path)
     asset_path = WEB_DIR / route
     content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+    if asset_path.suffix == ".js":
+        content_type = "application/javascript"
     if asset_path.suffix in {".html", ".css", ".js"}:
         content_type = f"{content_type}; charset=utf-8"
     return asset_path.read_bytes(), content_type
