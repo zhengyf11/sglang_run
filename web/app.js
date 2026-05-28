@@ -54,6 +54,7 @@ const enableMtpInput = document.querySelector('#enable-mtp');
 const mtpFields = document.querySelector('#mtp-fields');
 const attentionModeInputs = Array.from(document.querySelectorAll('input[name="attention_parallel_mode"]'));
 const contextBackendOptions = document.querySelector('#context-backend-options');
+const pipelineOptions = document.querySelector('#pipeline-options');
 const moeModeInputs = Array.from(document.querySelectorAll('input[name="moe_parallel_mode"]'));
 const expertOverlapOptions = document.querySelector('#expert-overlap-options');
 
@@ -107,6 +108,15 @@ function updateContextBackendVisibility() {
   }
 }
 
+function updatePipelineOptionsVisibility() {
+  const selectedMode = attentionModeInputs.find((input) => input.checked)?.value;
+  const visible = selectedMode === 'pipeline_parallel';
+  pipelineOptions.hidden = !visible;
+  for (const element of pipelineOptions.querySelectorAll('input')) {
+    element.disabled = !visible;
+  }
+}
+
 function updateExpertOverlapVisibility() {
   const selectedMode = moeModeInputs.find((input) => input.checked)?.value;
   const visible = selectedMode === 'expert_parallel';
@@ -152,6 +162,7 @@ function applyDefaults() {
   }
   updateMtpVisibility();
   updateContextBackendVisibility();
+  updatePipelineOptionsVisibility();
   updateExpertOverlapVisibility();
 }
 
@@ -222,7 +233,10 @@ async function copyOutput(targetId, button) {
 renderFields();
 form.addEventListener('input', (event) => {
   if (event.target === enableMtpInput) updateMtpVisibility();
-  if (attentionModeInputs.includes(event.target)) updateContextBackendVisibility();
+  if (attentionModeInputs.includes(event.target)) {
+    updateContextBackendVisibility();
+    updatePipelineOptionsVisibility();
+  }
   if (moeModeInputs.includes(event.target)) updateExpertOverlapVisibility();
   scheduleRefresh();
 });

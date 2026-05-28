@@ -89,6 +89,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(config["parallel_tp_size"], 8)
         self.assertEqual(config["attention_parallel_mode"], "tensor")
         self.assertEqual(config["context_parallel_backend"], "nsa")
+        self.assertTrue(config["enable_dynamic_chunking"])
+        self.assertEqual(config["dynamic_chunking_smooth_factor"], "0.8")
         self.assertEqual(config["moe_parallel_mode"], "tensor")
         self.assertFalse(config["enable_single_batch_overlap"])
         self.assertFalse(config["enable_two_batch_overlap"])
@@ -218,6 +220,35 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--pp-size") + 1], "8")
         self.assertIn("--enable-dynamic-chunking", cmd)
         self.assertIn("#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8", response["combined_shell"])
+
+    def test_pipeline_parallel_uses_custom_dynamic_chunking_smooth_factor(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "parallel_tp_size": 4,
+                "attention_parallel_mode": "pipeline_parallel",
+                "dynamic_chunking_smooth_factor": "0.6",
+            }
+        )
+
+        self.assertIn("--enable-dynamic-chunking", response["command"])
+        self.assertIn("#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.6", response["combined_shell"])
+        self.assertNotIn("#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8", response["combined_shell"])
+
+    def test_pipeline_parallel_can_disable_dynamic_chunking(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "parallel_tp_size": 8,
+                "attention_parallel_mode": "pipeline_parallel",
+                "enable_dynamic_chunking": False,
+                "dynamic_chunking_smooth_factor": "0.6",
+            }
+        )
+        cmd = response["command"]
+
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--pp-size") + 1], "8")
+        self.assertNotIn("--enable-dynamic-chunking", cmd)
+        self.assertNotIn("SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR", response["combined_shell"])
 
     def test_mtp_parameters_are_omitted_until_enabled(self) -> None:
         response = prefill_command_web.build_command_response(
@@ -411,6 +442,7 @@ class WebUiStaticTests(unittest.TestCase):
     def test_parallel_section_uses_radio_groups_and_hides_context_backend_until_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
 
         self.assertIn('id="parallel-heading"', html)
         self.assertIn('name="parallel_tp_size"', html)
@@ -418,6 +450,7 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('value="dp_attention"', html)
         self.assertIn('value="context_parallel"', html)
         self.assertIn('value="pipeline_parallel"', html)
+        self.assertIn('class="attention-option-stack"', html)
         self.assertIn('name="context_parallel_backend"', html)
         self.assertIn('id="context-backend-options" hidden', html)
         self.assertIn('name="moe_parallel_mode"', html)
@@ -427,7 +460,21 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("updateContextBackendVisibility", js)
         self.assertIn("updateExpertOverlapVisibility", js)
         self.assertIn("if (!visible) element.checked = false;", js)
+        self.assertIn(".context-backend-options .radio-option", css)
+        self.assertIn(".context-backend-options,\n.pipeline-options,\n.expert-overlap-options {\n  padding-top: 8px;", css)
         self.assertNotIn("tensor_parallel_size", js)
+
+    def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="pipeline-options" hidden', html)
+        self.assertIn('name="enable_dynamic_chunking"', html)
+        self.assertIn('name="dynamic_chunking_smooth_factor"', html)
+        self.assertIn('SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR', html)
+        self.assertIn("updatePipelineOptionsVisibility", js)
+        self.assertIn("pipelineOptions.hidden = !visible;", js)
+        self.assertIn("element.disabled = !visible;", js)
 
 
 class ReadmeDocumentationTests(unittest.TestCase):
@@ -436,6 +483,8 @@ class ReadmeDocumentationTests(unittest.TestCase):
 
         self.assertIn("--tp-size 8", readme)
         self.assertIn('"parallel_tp_size":4', readme)
+        self.assertIn("SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR", readme)
+        self.assertIn("默认启用 / `0.8`", readme)
         self.assertNotIn("--tensor-parallel-size", readme)
         self.assertNotIn("tensor_parallel_size", readme)
 

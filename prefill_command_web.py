@@ -22,6 +22,8 @@ DEFAULTS: dict[str, Any] = {
     "parallel_tp_size": 8,
     "attention_parallel_mode": "tensor",
     "context_parallel_backend": "nsa",
+    "enable_dynamic_chunking": True,
+    "dynamic_chunking_smooth_factor": "0.8",
     "moe_parallel_mode": "tensor",
     "enable_single_batch_overlap": False,
     "enable_two_batch_overlap": False,
@@ -109,6 +111,9 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = {} if payload is None else dict(payload)
     config = {key: (raw[key] if _has_value(raw.get(key)) else value) for key, value in DEFAULTS.items()}
     config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
+    config["enable_dynamic_chunking"] = _to_bool(
+        raw.get("enable_dynamic_chunking"), DEFAULTS["enable_dynamic_chunking"]
+    )
     config["enable_single_batch_overlap"] = _to_bool(
         raw.get("enable_single_batch_overlap"), DEFAULTS["enable_single_batch_overlap"]
     )
@@ -158,7 +163,9 @@ def build_parallel_args(config: Mapping[str, Any]) -> list[str]:
         cmd.extend(["--nsa-prefill-cp-mode", "in-seq-split"])
         _append_unique_flag(cmd, "--enable-two-batch-overlap")
     elif attention_mode == "pipeline_parallel":
-        cmd.extend(["--tp-size", "1", "--pp-size", tp_size, "--enable-dynamic-chunking"])
+        cmd.extend(["--tp-size", "1", "--pp-size", tp_size])
+        if config.get("enable_dynamic_chunking"):
+            cmd.append("--enable-dynamic-chunking")
     else:
         raise ValueError(f"unsupported attention_parallel_mode: {attention_mode}")
 
@@ -224,8 +231,9 @@ def build_env_exports(config: Mapping[str, Any]) -> list[str]:
 
 
 def build_shell_hints(config: Mapping[str, Any]) -> list[str]:
-    if config.get("attention_parallel_mode") == "pipeline_parallel":
-        return ["#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8"]
+    if config.get("attention_parallel_mode") == "pipeline_parallel" and config.get("enable_dynamic_chunking"):
+        smooth_factor = config.get("dynamic_chunking_smooth_factor", DEFAULTS["dynamic_chunking_smooth_factor"])
+        return [f"#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR={smooth_factor}"]
     return []
 
 
