@@ -298,6 +298,21 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("No closing quotation", response)
 
 
+class WebUiStaticTests(unittest.TestCase):
+    def test_mtp_fields_are_hidden_until_checkbox_is_enabled(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        self.assertIn('id="enable-mtp"', html)
+        self.assertNotIn('id="enable-mtp" checked', html)
+        self.assertIn('id="mtp-fields" hidden', html)
+        self.assertRegex(css, r"\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}")
+        self.assertIn("mtpFields.hidden = !enabled;", js)
+        self.assertIn("element.disabled = !enabled;", js)
+        self.assertIn("if (event.target === enableMtpInput) updateMtpVisibility();", js)
+
+
 class GitignoreTests(unittest.TestCase):
     def test_hidden_directories_are_ignored_while_gitignore_stays_tracked(self) -> None:
         patterns = Path(".gitignore").read_text(encoding="utf-8").splitlines()
