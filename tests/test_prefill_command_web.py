@@ -45,6 +45,38 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertFalse(response["executed"])
         self.assertIn("python3 -m sglang.launch_server", response["shell_command"])
 
+    def test_shell_command_formats_launch_args_on_separate_lines(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "model_path": "/mnt/GLM-5.1-FP8",
+                "served_model_name": "GLM-5.1-FP8",
+                "tensor_parallel_size": 8,
+            }
+        )
+
+        shell_lines = response["shell_command"].splitlines()
+
+        self.assertEqual(shell_lines[0], "python3 -m sglang.launch_server \\")
+        self.assertEqual(shell_lines[1], "\t--model-path /mnt/GLM-5.1-FP8 \\")
+        self.assertEqual(shell_lines[2], "\t--served-model-name GLM-5.1-FP8 \\")
+        self.assertEqual(shell_lines[3], "\t--tensor-parallel-size 8 \\")
+        self.assertTrue(all(line.endswith(" \\") for line in shell_lines[:-1]))
+        self.assertFalse(shell_lines[-1].endswith("\\"))
+        self.assertEqual(
+            response["command"][:9],
+            [
+                "python3",
+                "-m",
+                "sglang.launch_server",
+                "--model-path",
+                "/mnt/GLM-5.1-FP8",
+                "--served-model-name",
+                "GLM-5.1-FP8",
+                "--tensor-parallel-size",
+                "8",
+            ],
+        )
+
     def test_blank_missing_and_none_fields_use_defaults(self) -> None:
         config = prefill_command_web.normalize_form_payload(
             {"model_path": "", "served_model_name": None, "tensor_parallel_size": "  "}
