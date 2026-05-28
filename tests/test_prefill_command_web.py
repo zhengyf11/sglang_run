@@ -87,6 +87,7 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(config["model_path"], "/mnt/GLM-5.1-FP8")
         self.assertEqual(config["served_model_name"], "GLM-5.1-FP8")
         self.assertEqual(config["parallel_tp_size"], 8)
+        self.assertEqual(config["dp_size"], 8)
         self.assertEqual(config["attention_parallel_mode"], "tensor")
         self.assertEqual(config["context_parallel_backend"], "nsa")
         self.assertTrue(config["enable_dynamic_chunking"])
@@ -123,8 +124,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertNotIn("--tensor-parallel-size", cmd)
         self.assertEqual(cmd[cmd.index("--host") + 1], "127.0.0.1")
         self.assertEqual(cmd[cmd.index("--port") + 1], "31000")
-        self.assertEqual(cmd[cmd.index("--nnodes") + 1], "2")
-        self.assertEqual(cmd[cmd.index("--node-rank") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--nnodes") + 1], "1")
+        self.assertEqual(cmd[cmd.index("--node-rank") + 1], "0")
         self.assertEqual(cmd[cmd.index("--dist-init-addr") + 1], "10.0.0.1:20000")
         self.assertEqual(cmd[cmd.index("--disaggregation-transfer-backend") + 1], "custom-backend")
         self.assertEqual(cmd[cmd.index("--disaggregation-ib-device") + 1], "mlx5_0")
@@ -133,13 +134,22 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "4096")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "32768")
 
-    def test_attention_dp_parallel_adds_required_flags(self) -> None:
+    def test_attention_dp_parallel_defaults_dp_size_to_world_size(self) -> None:
         cmd = prefill_command_web.build_command_response(
-            {"parallel_tp_size": 8, "attention_parallel_mode": "dp_attention"}
+            {"parallel_tp_size": 8, "attention_parallel_mode": "dp_attention", "dp_size": ""}
         )["command"]
 
         self.assertEqual(cmd[cmd.index("--tp-size") + 1], "8")
         self.assertEqual(cmd[cmd.index("--dp-size") + 1], "8")
+        self.assertIn("--enable-dp-attention", cmd)
+
+    def test_attention_dp_parallel_uses_custom_dp_size(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {"parallel_tp_size": 8, "attention_parallel_mode": "dp_attention", "dp_size": 2}
+        )["command"]
+
+        self.assertEqual(cmd[cmd.index("--tp-size") + 1], "8")
+        self.assertEqual(cmd[cmd.index("--dp-size") + 1], "2")
         self.assertIn("--enable-dp-attention", cmd)
 
     def test_context_parallel_selects_backend_and_deduplicates_overlap(self) -> None:
@@ -307,11 +317,20 @@ class CommandGenerationTests(unittest.TestCase):
 
     def test_env_exports_and_proxy_unsets_are_display_only(self) -> None:
         response = prefill_command_web.build_command_response(
-            {"NCCL_IB_GID_INDEX": "5", "NCCL_IB_HCA": "mlx5_0"}
+            {
+                "NCCL_IB_GID_INDEX": "5",
+                "NCCL_IB_HCA": "mlx5_0",
+                "NCCL_IB_TC": "64",
+                "NCCL_IB_TIMEOUT": "10",
+                "NCCL_IB_RETRY_CNT": "3",
+            }
         )
 
-        self.assertIn("export NCCL_IB_GID_INDEX=5", response["env_exports"])
+        self.assertIn("export NCCL_IB_GID_INDEX=3", response["env_exports"])
         self.assertIn("export NCCL_IB_HCA=mlx5_0", response["env_exports"])
+        self.assertIn("export NCCL_IB_TC=128", response["env_exports"])
+        self.assertIn("export NCCL_IB_TIMEOUT=22", response["env_exports"])
+        self.assertIn("export NCCL_IB_RETRY_CNT=15", response["env_exports"])
         self.assertIn("unset http_proxy", response["proxy_unsets"])
         self.assertIn("unset HTTPS_PROXY", response["proxy_unsets"])
 
@@ -445,7 +464,11 @@ class WebUiStaticTests(unittest.TestCase):
         css = Path("web/styles.css").read_text(encoding="utf-8")
 
         self.assertIn('id="parallel-heading"', html)
+        self.assertIn('world size', html)
+        self.assertNotIn('TP / EP / PP size', html)
         self.assertIn('name="parallel_tp_size"', html)
+        self.assertIn('id="dp-size-field" hidden', html)
+        self.assertIn('name="dp_size"', html)
         self.assertIn('name="attention_parallel_mode"', html)
         self.assertIn('value="dp_attention"', html)
         self.assertIn('value="context_parallel"', html)
@@ -458,11 +481,37 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('name="enable_single_batch_overlap"', html)
         self.assertIn('name="enable_two_batch_overlap"', html)
         self.assertIn("updateContextBackendVisibility", js)
+        self.assertIn("updateDpSizeVisibility", js)
+        self.assertIn("dpSizeInput.value = worldSizeInput.value || state.defaults.parallel_tp_size || '';", js)
         self.assertIn("updateExpertOverlapVisibility", js)
         self.assertIn("if (!visible) element.checked = false;", js)
         self.assertIn(".context-backend-options .radio-option", css)
-        self.assertIn(".context-backend-options,\n.pipeline-options,\n.expert-overlap-options {\n  padding-top: 8px;", css)
+        self.assertIn(".context-backend-options,\n.pipeline-options,\n.dp-size-field,\n.expert-overlap-options {\n  padding-top: 8px;", css)
         self.assertNotIn("tensor_parallel_size", js)
+
+    def test_hidden_fixed_fields_and_extra_args_are_not_rendered(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        for removed_text in (
+            "Number of nodes",
+            "Node rank",
+            "Extra SGLang args",
+            "NCCL IB GID index",
+            "NCCL IB TC",
+            "NCCL IB timeout",
+            "NCCL IB retry count",
+        ):
+            with self.subTest(removed_text=removed_text):
+                self.assertNotIn(removed_text, html)
+                self.assertNotIn(removed_text, js)
+        self.assertNotIn('name="extra_sglang_args"', html)
+        self.assertNotIn('id="env-fields"', html)
+        self.assertNotIn("extra_sglang_args", js)
+        self.assertNotIn("NCCL_IB_GID_INDEX", js)
+        self.assertNotIn("NCCL_IB_TC", js)
+        self.assertNotIn("NCCL_IB_TIMEOUT", js)
+        self.assertNotIn("NCCL_IB_RETRY_CNT", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
