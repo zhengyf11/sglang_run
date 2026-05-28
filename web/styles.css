@@ -141,6 +141,18 @@ h3 {
   justify-content: flex-end;
 }
 
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.section-heading-row h3 {
+  margin-bottom: 0;
+}
+
 .field-group {
   margin-top: 16px;
   padding-top: 16px;
@@ -164,6 +176,30 @@ h3 {
 .field.wide,
 .wide-field {
   grid-column: 1 / -1;
+}
+
+.mtp-field-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mtp-field-grid .field {
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.mtp-field-grid input {
+  padding: 8px 10px;
+  border-radius: 12px;
+  font-size: 0.82rem;
+}
+
+.mtp-field-grid .hint {
+  font-size: 0.68rem;
+  white-space: nowrap;
 }
 
 .hint {
@@ -213,6 +249,14 @@ textarea {
   background: #f8fafc;
   color: #334155;
   font-weight: 800;
+}
+
+.compact-toggle {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 7px 10px;
+  font-size: 0.82rem;
+  white-space: nowrap;
 }
 
 .toggle input {
@@ -284,8 +328,12 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .field-grid {
+  .field-grid:not(.mtp-field-grid) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mtp-field-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .output-panel {
@@ -304,7 +352,8 @@ textarea {
     border-radius: 18px;
   }
 
-  .field-grid {
+  .field-grid,
+  .mtp-field-grid {
     grid-template-columns: 1fr;
   }
 

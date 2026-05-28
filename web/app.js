@@ -7,13 +7,15 @@ const fieldGroups = {
     { name: 'reasoning_parser', label: 'Reasoning parser' },
   ],
   runtime: [
+    { name: 'mem_fraction_static', label: 'Mem fraction static' },
+    { name: 'host', label: 'SGLang host' },
+    { name: 'port', label: 'SGLang port', type: 'number' },
+  ],
+  mtp: [
     { name: 'speculative_algorithm', label: 'Speculative algorithm' },
     { name: 'speculative_num_steps', label: 'Speculative steps', type: 'number' },
     { name: 'speculative_eagle_topk', label: 'EAGLE top-k', type: 'number' },
     { name: 'speculative_num_draft_tokens', label: 'Draft tokens', type: 'number' },
-    { name: 'mem_fraction_static', label: 'Mem fraction static' },
-    { name: 'host', label: 'SGLang host' },
-    { name: 'port', label: 'SGLang port', type: 'number' },
   ],
   disaggregation: [
     { name: 'nnodes', label: 'Number of nodes', type: 'number' },
@@ -49,6 +51,8 @@ const statusText = document.querySelector('#status-text');
 const errorBox = document.querySelector('#error-box');
 const combinedOutput = document.querySelector('#combined-output');
 const resetButton = document.querySelector('#reset-button');
+const enableMtpInput = document.querySelector('#enable-mtp');
+const mtpFields = document.querySelector('#mtp-fields');
 
 function createField({ name, label, type = 'text', wide = false }) {
   const wrapper = document.createElement('label');
@@ -72,6 +76,7 @@ function renderFields() {
   const targets = {
     model: document.querySelector('#model-fields'),
     runtime: document.querySelector('#runtime-fields'),
+    mtp: mtpFields,
     disaggregation: document.querySelector('#disaggregation-fields'),
     limits: document.querySelector('#limit-fields'),
     env: document.querySelector('#env-fields'),
@@ -79,6 +84,14 @@ function renderFields() {
 
   for (const [group, fields] of Object.entries(fieldGroups)) {
     targets[group].replaceChildren(...fields.map(createField));
+  }
+}
+
+function updateMtpVisibility() {
+  const enabled = Boolean(enableMtpInput?.checked);
+  mtpFields.hidden = !enabled;
+  for (const element of mtpFields.querySelectorAll('input')) {
+    element.disabled = !enabled;
   }
 }
 
@@ -113,12 +126,13 @@ function applyDefaults() {
     const value = state.defaults[hint.dataset.hintFor];
     hint.textContent = value === undefined ? '' : `Default: ${value}`;
   }
+  updateMtpVisibility();
 }
 
 function collectPayload() {
   const payload = {};
   for (const element of form.elements) {
-    if (!element.name) continue;
+    if (!element.name || element.disabled) continue;
     payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
   }
   return payload;
@@ -179,7 +193,10 @@ async function copyOutput(targetId, button) {
 }
 
 renderFields();
-form.addEventListener('input', scheduleRefresh);
+form.addEventListener('input', (event) => {
+  if (event.target === enableMtpInput) updateMtpVisibility();
+  scheduleRefresh();
+});
 resetButton.addEventListener('click', () => {
   applyDefaults();
   refreshCommand();

@@ -20,10 +20,10 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--tensor-parallel-size") + 1], "8")
         self.assertEqual(cmd[cmd.index("--tool-call-parser") + 1], "glm47")
         self.assertEqual(cmd[cmd.index("--reasoning-parser") + 1], "glm45")
-        self.assertEqual(cmd[cmd.index("--speculative-algorithm") + 1], "EAGLE")
-        self.assertEqual(cmd[cmd.index("--speculative-num-steps") + 1], "3")
-        self.assertEqual(cmd[cmd.index("--speculative-eagle-topk") + 1], "1")
-        self.assertEqual(cmd[cmd.index("--speculative-num-draft-tokens") + 1], "4")
+        self.assertNotIn("--speculative-algorithm", cmd)
+        self.assertNotIn("--speculative-num-steps", cmd)
+        self.assertNotIn("--speculative-eagle-topk", cmd)
+        self.assertNotIn("--speculative-num-draft-tokens", cmd)
         self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.7")
         self.assertEqual(cmd[cmd.index("--host") + 1], "0.0.0.0")
         self.assertEqual(cmd[cmd.index("--port") + 1], "30000")
@@ -122,6 +122,42 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "64")
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "4096")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "32768")
+
+    def test_mtp_parameters_are_omitted_until_enabled(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "enable_mtp": False,
+                "speculative_algorithm": "EAGLE",
+                "speculative_num_steps": 5,
+                "speculative_eagle_topk": 2,
+                "speculative_num_draft_tokens": 8,
+            }
+        )
+        cmd = response["command"]
+
+        self.assertFalse(response["config"]["enable_mtp"])
+        self.assertNotIn("--speculative-algorithm", cmd)
+        self.assertNotIn("--speculative-num-steps", cmd)
+        self.assertNotIn("--speculative-eagle-topk", cmd)
+        self.assertNotIn("--speculative-num-draft-tokens", cmd)
+
+    def test_mtp_parameters_are_included_when_enabled(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "enable_mtp": True,
+                "speculative_algorithm": "EAGLE",
+                "speculative_num_steps": 5,
+                "speculative_eagle_topk": 2,
+                "speculative_num_draft_tokens": 8,
+            }
+        )
+        cmd = response["command"]
+
+        self.assertTrue(response["config"]["enable_mtp"])
+        self.assertEqual(cmd[cmd.index("--speculative-algorithm") + 1], "EAGLE")
+        self.assertEqual(cmd[cmd.index("--speculative-num-steps") + 1], "5")
+        self.assertEqual(cmd[cmd.index("--speculative-eagle-topk") + 1], "2")
+        self.assertEqual(cmd[cmd.index("--speculative-num-draft-tokens") + 1], "8")
 
     def test_boolean_options_control_flags(self) -> None:
         cmd = prefill_command_web.build_command_response(

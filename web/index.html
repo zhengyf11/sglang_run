@@ -31,8 +31,12 @@
         </section>
 
         <section class="field-group" aria-labelledby="runtime-heading">
-          <h3 id="runtime-heading">Runtime</h3>
+          <div class="section-heading-row">
+            <h3 id="runtime-heading">Runtime</h3>
+            <label class="toggle compact-toggle"><input type="checkbox" name="enable_mtp" id="enable-mtp"> <span>打开 MTP</span></label>
+          </div>
           <div class="field-grid" id="runtime-fields"></div>
+          <div class="field-grid mtp-field-grid" id="mtp-fields" hidden></div>
         </section>
 
         <section class="field-group" aria-labelledby="disaggregation-heading">
