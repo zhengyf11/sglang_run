@@ -122,7 +122,7 @@ http://127.0.0.1:6060/
 
 Parallel 分组会根据 Attention/MoE 阶段单选项自动补齐固定参数，不需要在 Extra SGLang args 中手填：
 
-- Attention：Tensor parallel 生成 `--tp-size <N>`；DP attention 额外生成 `--dp-size <N> --enable-dp-attention`；Context parallel 可在 `--enable-nsa-prefill-context-parallel` 与 `--enable-prefill-context-parallel` 中二选一，并自动生成 `--nsa-prefill-cp-mode in-seq-split --enable-two-batch-overlap`；Pipeline parallel 生成 `--tp-size 1 --pp-size <N> --enable-dynamic-chunking`，Full shell 中会提示 `#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=0.8`。
+- Attention：Tensor parallel 生成 `--tp-size <N>`；DP attention 额外生成 `--dp-size <N> --enable-dp-attention`；Context parallel 可在竖向展开的 `--enable-nsa-prefill-context-parallel` 与 `--enable-prefill-context-parallel` 中二选一，并自动生成 `--nsa-prefill-cp-mode in-seq-split --enable-two-batch-overlap`；Pipeline parallel 生成 `--tp-size 1 --pp-size <N>`，并动态展示 `--enable-dynamic-chunking` 与 `SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR` 可选项（默认启用 / `0.8`），启用时 Full shell 中会提示对应 `#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=<value>`。
 - MoE：Tensor parallel 不再自动生成 overlap 参数；Expert parallel 生成 `--ep-size=<N> --moe-a2a-backend deepep`，并仅在选择 Expert parallel 时展示 `--enable-single-batch-overlap` / `--enable-two-batch-overlap` 两个可选复选框，勾选后才生成对应参数。
 
 页面也会生成 NCCL export 和代理环境变量 unset 提示，供人工复制使用：

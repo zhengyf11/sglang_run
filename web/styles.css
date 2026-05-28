@@ -209,13 +209,28 @@ h3 {
 
 .radio-grid,
 .context-backend-options,
-.expert-overlap-options {
+.pipeline-options,
+.expert-overlap-options,
+.attention-options,
+.attention-option-stack {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
+.radio-grid,
+.attention-options {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.attention-option-stack,
 .context-backend-options,
+.pipeline-options,
+.expert-overlap-options {
+  grid-template-columns: 1fr;
+}
+
+.context-backend-options,
+.pipeline-options,
 .expert-overlap-options {
   padding-top: 8px;
   border-top: 1px dashed var(--border);
@@ -250,14 +265,29 @@ h3 {
   grid-template-columns: 1fr;
 }
 
-.expert-overlap-options {
-  grid-template-columns: 1fr;
-}
-
-.expert-overlap-options .compact-toggle {
+.context-backend-options .radio-option,
+.pipeline-options .compact-toggle,
+.expert-overlap-options .compact-toggle,
+.compact-field {
   margin-left: 0;
   padding: 7px 9px;
   font-size: 0.8rem;
+}
+
+.compact-field {
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #ffffff;
+  color: #334155;
+  font-weight: 800;
+}
+
+.compact-field input {
+  padding: 7px 9px;
+  border-radius: 10px;
+  font-size: 0.82rem;
 }
 
 .mtp-field-grid {

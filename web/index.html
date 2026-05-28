@@ -39,16 +39,27 @@
             </label>
             <div class="parallel-card">
               <p class="parallel-label">Attention stage</p>
-              <div class="radio-grid">
+              <div class="attention-options">
                 <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
                 <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
-                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
-                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="pipeline_parallel"> <span>Pipeline parallel</span></label>
-              </div>
-              <div class="context-backend-options" id="context-backend-options" hidden>
-                <span class="hint">Context backend</span>
-                <label class="radio-option"><input type="radio" name="context_parallel_backend" value="nsa"> <span>NSA prefill CP</span></label>
-                <label class="radio-option"><input type="radio" name="context_parallel_backend" value="prefill"> <span>Prefill CP</span></label>
+                <div class="attention-option-stack">
+                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
+                  <div class="context-backend-options" id="context-backend-options" hidden>
+                    <span class="hint">Context backend</span>
+                    <label class="radio-option"><input type="radio" name="context_parallel_backend" value="nsa"> <span>NSA prefill CP</span></label>
+                    <label class="radio-option"><input type="radio" name="context_parallel_backend" value="prefill"> <span>Prefill CP</span></label>
+                  </div>
+                </div>
+                <div class="attention-option-stack">
+                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="pipeline_parallel"> <span>Pipeline parallel</span></label>
+                  <div class="pipeline-options" id="pipeline-options" hidden>
+                    <label class="toggle compact-toggle"><input type="checkbox" name="enable_dynamic_chunking"> <span>--enable-dynamic-chunking</span></label>
+                    <label class="field compact-field">SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR
+                      <input type="text" name="dynamic_chunking_smooth_factor" autocomplete="off">
+                      <span class="hint" data-hint-for="dynamic_chunking_smooth_factor"></span>
+                    </label>
+                  </div>
+                </div>
               </div>
             </div>
             <div class="parallel-card">
