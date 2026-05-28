@@ -132,7 +132,26 @@ def build_prefill_command(config: Mapping[str, Any]) -> list[str]:
 
 
 def build_shell_command(command: Sequence[str]) -> str:
-    return shlex.join(command)
+    if len(command) <= 3:
+        return shlex.join(command)
+
+    head = shlex.join(command[:3])
+    argument_groups: list[Sequence[str]] = []
+    index = 3
+    while index < len(command):
+        current = command[index]
+        if current.startswith("--") and index + 1 < len(command) and not command[index + 1].startswith("--"):
+            argument_groups.append(command[index:index + 2])
+            index += 2
+        else:
+            argument_groups.append(command[index:index + 1])
+            index += 1
+
+    lines = [f"{head} \\"]
+    for group_index, group in enumerate(argument_groups):
+        suffix = " \\" if group_index < len(argument_groups) - 1 else ""
+        lines.append(f"\t{shlex.join(group)}{suffix}")
+    return "\n".join(lines)
 
 
 def build_env_exports(config: Mapping[str, Any]) -> list[str]:
