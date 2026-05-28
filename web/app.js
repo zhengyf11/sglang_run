@@ -17,8 +17,6 @@ const fieldGroups = {
     { name: 'speculative_num_draft_tokens', label: 'Draft tokens', type: 'number' },
   ],
   disaggregation: [
-    { name: 'nnodes', label: 'Number of nodes', type: 'number' },
-    { name: 'node_rank', label: 'Node rank', type: 'number' },
     { name: 'dist_init_addr', label: 'Dist init address' },
     { name: 'disaggregation_mode', label: 'Mode' },
     { name: 'disaggregation_transfer_backend', label: 'Transfer backend' },
@@ -28,14 +26,6 @@ const fieldGroups = {
     { name: 'max_running_requests', label: 'Max running requests', type: 'number' },
     { name: 'chunked_prefill_size', label: 'Chunked prefill size', type: 'number' },
     { name: 'max_prefill_tokens', label: 'Max prefill tokens', type: 'number' },
-  ],
-  env: [
-    { name: 'NCCL_IB_GID_INDEX', label: 'NCCL IB GID index' },
-    { name: 'NCCL_IB_HCA', label: 'NCCL IB HCA' },
-    { name: 'NCCL_SOCKET_IFNAME', label: 'NCCL socket interface' },
-    { name: 'NCCL_IB_TC', label: 'NCCL IB TC' },
-    { name: 'NCCL_IB_TIMEOUT', label: 'NCCL IB timeout' },
-    { name: 'NCCL_IB_RETRY_CNT', label: 'NCCL IB retry count' },
   ],
 };
 
@@ -55,6 +45,9 @@ const mtpFields = document.querySelector('#mtp-fields');
 const attentionModeInputs = Array.from(document.querySelectorAll('input[name="attention_parallel_mode"]'));
 const contextBackendOptions = document.querySelector('#context-backend-options');
 const pipelineOptions = document.querySelector('#pipeline-options');
+const dpSizeField = document.querySelector('#dp-size-field');
+const dpSizeInput = dpSizeField?.querySelector('input[name="dp_size"]');
+const worldSizeInput = form.querySelector('input[name="parallel_tp_size"]');
 const moeModeInputs = Array.from(document.querySelectorAll('input[name="moe_parallel_mode"]'));
 const expertOverlapOptions = document.querySelector('#expert-overlap-options');
 
@@ -83,7 +76,6 @@ function renderFields() {
     mtp: mtpFields,
     disaggregation: document.querySelector('#disaggregation-fields'),
     limits: document.querySelector('#limit-fields'),
-    env: document.querySelector('#env-fields'),
   };
 
   for (const [group, fields] of Object.entries(fieldGroups)) {
@@ -114,6 +106,17 @@ function updatePipelineOptionsVisibility() {
   pipelineOptions.hidden = !visible;
   for (const element of pipelineOptions.querySelectorAll('input')) {
     element.disabled = !visible;
+  }
+}
+
+function updateDpSizeVisibility({ syncDefault = false } = {}) {
+  const selectedMode = attentionModeInputs.find((input) => input.checked)?.value;
+  const visible = selectedMode === 'dp_attention';
+  dpSizeField.hidden = !visible;
+  if (!dpSizeInput) return;
+  dpSizeInput.disabled = !visible;
+  if (visible && (syncDefault || !dpSizeInput.value)) {
+    dpSizeInput.value = worldSizeInput.value || state.defaults.parallel_tp_size || '';
   }
 }
 
@@ -163,6 +166,7 @@ function applyDefaults() {
   updateMtpVisibility();
   updateContextBackendVisibility();
   updatePipelineOptionsVisibility();
+  updateDpSizeVisibility({ syncDefault: true });
   updateExpertOverlapVisibility();
 }
 
@@ -236,6 +240,10 @@ form.addEventListener('input', (event) => {
   if (attentionModeInputs.includes(event.target)) {
     updateContextBackendVisibility();
     updatePipelineOptionsVisibility();
+    updateDpSizeVisibility({ syncDefault: event.target.value === 'dp_attention' });
+  }
+  if (event.target === worldSizeInput && dpSizeInput?.disabled) {
+    dpSizeInput.value = worldSizeInput.value;
   }
   if (moeModeInputs.includes(event.target)) updateExpertOverlapVisibility();
   scheduleRefresh();

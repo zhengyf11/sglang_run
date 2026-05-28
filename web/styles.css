@@ -210,6 +210,7 @@ h3 {
 .radio-grid,
 .context-backend-options,
 .pipeline-options,
+.dp-size-field,
 .expert-overlap-options,
 .attention-options,
 .attention-option-stack {
@@ -225,12 +226,14 @@ h3 {
 .attention-option-stack,
 .context-backend-options,
 .pipeline-options,
+.dp-size-field,
 .expert-overlap-options {
   grid-template-columns: 1fr;
 }
 
 .context-backend-options,
 .pipeline-options,
+.dp-size-field,
 .expert-overlap-options {
   padding-top: 8px;
   border-top: 1px dashed var(--border);

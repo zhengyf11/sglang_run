@@ -120,12 +120,12 @@ http://127.0.0.1:6060/
 - `--trust-remote-code --disable-cuda-graph`
 - `--max-running-requests 128 --chunked-prefill-size 8192 --max-prefill-tokens 65536`
 
-Parallel 分组会根据 Attention/MoE 阶段单选项自动补齐固定参数，不需要在 Extra SGLang args 中手填：
+Parallel 分组使用 `world size` 输入统一控制 TP/EP/PP 规模，并根据 Attention/MoE 阶段单选项自动补齐固定参数：
 
-- Attention：Tensor parallel 生成 `--tp-size <N>`；DP attention 额外生成 `--dp-size <N> --enable-dp-attention`；Context parallel 可在竖向展开的 `--enable-nsa-prefill-context-parallel` 与 `--enable-prefill-context-parallel` 中二选一，并自动生成 `--nsa-prefill-cp-mode in-seq-split --enable-two-batch-overlap`；Pipeline parallel 生成 `--tp-size 1 --pp-size <N>`，并动态展示 `--enable-dynamic-chunking` 与 `SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR` 可选项（默认启用 / `0.8`），启用时 Full shell 中会提示对应 `#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=<value>`。
+- Attention：Tensor parallel 生成 `--tp-size <world size>`；DP attention 会动态展示 `dp-size` 输入框，默认等于当前 `world size`，可手动修改，并生成 `--tp-size <world size> --dp-size <dp-size> --enable-dp-attention`；Context parallel 可在竖向展开的 `--enable-nsa-prefill-context-parallel` 与 `--enable-prefill-context-parallel` 中二选一，并自动生成 `--nsa-prefill-cp-mode in-seq-split --enable-two-batch-overlap`；Pipeline parallel 生成 `--tp-size 1 --pp-size <world size>`，并动态展示 `--enable-dynamic-chunking` 与 `SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR` 可选项（默认启用 / `0.8`），启用时 Full shell 中会提示对应 `#export SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR=<value>`。
 - MoE：Tensor parallel 不再自动生成 overlap 参数；Expert parallel 生成 `--ep-size=<N> --moe-a2a-backend deepep`，并仅在选择 Expert parallel 时展示 `--enable-single-batch-overlap` / `--enable-two-batch-overlap` 两个可选复选框，勾选后才生成对应参数。
 
-页面也会生成 NCCL export 和代理环境变量 unset 提示，供人工复制使用：
+页面不展示 `Number of nodes`、`Node rank` 以及固定 NCCL 参数输入；后端仍会使用 `--nnodes 1`、`--node-rank 0` 并生成以下 NCCL export 和代理环境变量 unset 提示，供人工复制使用：
 
 | 环境变量 | 默认值 |
 | --- | --- |
@@ -149,10 +149,10 @@ Web UI 使用以下本地接口：
 ```bash
 curl -s http://127.0.0.1:6060/api/command \
   -H 'Content-Type: application/json' \
-  -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","parallel_tp_size":4,"extra_sglang_args":"--log-level debug"}'
+  -d '{"model_path":"/mnt/Custom-Model","served_model_name":"custom-model","parallel_tp_size":4,"attention_parallel_mode":"dp_attention","dp_size":2}'
 ```
 
-额外 SGLang 参数在页面的 `Extra SGLang args` 文本框填写，后端使用 `shlex.split()` 解析并追加到命令末尾；无法解析时 API 返回 400，不生成错误命令。
+`parallel_tp_size` 是后端兼容字段，在 Web UI 中显示为 `world size`；未选择 DP attention 时页面不会提交 `dp_size`。
 
 ## 开发与测试
 

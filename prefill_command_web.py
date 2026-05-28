@@ -20,6 +20,7 @@ DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
     "served_model_name": "GLM-5.1-FP8",
     "parallel_tp_size": 8,
+    "dp_size": 8,
     "attention_parallel_mode": "tensor",
     "context_parallel_backend": "nsa",
     "enable_dynamic_chunking": True,
@@ -65,6 +66,15 @@ PROXY_ENV_VARS = (
     "HTTP_PROXY", "HTTPS_PROXY", "FTP_PROXY", "ALL_PROXY",
 )
 
+FIXED_FORM_DEFAULT_KEYS = {
+    "nnodes",
+    "node_rank",
+    "NCCL_IB_GID_INDEX",
+    "NCCL_IB_TC",
+    "NCCL_IB_TIMEOUT",
+    "NCCL_IB_RETRY_CNT",
+}
+
 MTP_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("speculative_algorithm", "--speculative-algorithm"),
     ("speculative_num_steps", "--speculative-num-steps"),
@@ -109,7 +119,10 @@ def _to_bool(value: Any, default: bool) -> bool:
 def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """Apply Issue #2 defaults when fields are omitted, blank, or null."""
     raw = {} if payload is None else dict(payload)
-    config = {key: (raw[key] if _has_value(raw.get(key)) else value) for key, value in DEFAULTS.items()}
+    config = {
+        key: (raw[key] if key not in FIXED_FORM_DEFAULT_KEYS and _has_value(raw.get(key)) else value)
+        for key, value in DEFAULTS.items()
+    }
     config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
     config["enable_dynamic_chunking"] = _to_bool(
         raw.get("enable_dynamic_chunking"), DEFAULTS["enable_dynamic_chunking"]
@@ -123,7 +136,7 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     config["trust_remote_code"] = _to_bool(raw.get("trust_remote_code"), DEFAULTS["trust_remote_code"])
     config["disable_cuda_graph"] = _to_bool(raw.get("disable_cuda_graph"), DEFAULTS["disable_cuda_graph"])
     for env_key, default in NCCL_ENV_DEFAULTS.items():
-        config[env_key] = raw[env_key] if _has_value(raw.get(env_key)) else default
+        config[env_key] = default if env_key in FIXED_FORM_DEFAULT_KEYS else raw[env_key] if _has_value(raw.get(env_key)) else default
     return config
 
 
@@ -152,7 +165,8 @@ def build_parallel_args(config: Mapping[str, Any]) -> list[str]:
     if attention_mode == "tensor":
         cmd.extend(["--tp-size", tp_size])
     elif attention_mode == "dp_attention":
-        cmd.extend(["--tp-size", tp_size, "--dp-size", tp_size, "--enable-dp-attention"])
+        dp_size = str(config.get("dp_size") if _has_value(config.get("dp_size")) else config["parallel_tp_size"])
+        cmd.extend(["--tp-size", tp_size, "--dp-size", dp_size, "--enable-dp-attention"])
     elif attention_mode == "context_parallel":
         cmd.extend(["--tp-size", tp_size])
         backend = str(config.get("context_parallel_backend", "nsa"))

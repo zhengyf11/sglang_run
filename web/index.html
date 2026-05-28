@@ -33,7 +33,7 @@
         <section class="field-group" aria-labelledby="parallel-heading">
           <h3 id="parallel-heading">Parallel</h3>
           <div class="parallel-grid">
-            <label class="field parallel-size">TP / EP / PP size
+            <label class="field parallel-size">world size
               <input type="number" name="parallel_tp_size" min="1" autocomplete="off">
               <span class="hint" data-hint-for="parallel_tp_size"></span>
             </label>
@@ -41,7 +41,13 @@
               <p class="parallel-label">Attention stage</p>
               <div class="attention-options">
                 <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
-                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
+                <div class="attention-option-stack">
+                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
+                  <label class="field compact-field dp-size-field" id="dp-size-field" hidden>dp-size
+                    <input type="number" name="dp_size" min="1" autocomplete="off" disabled>
+                    <span class="hint" data-hint-for="dp_size"></span>
+                  </label>
+                </div>
                 <div class="attention-option-stack">
                   <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
                   <div class="context-backend-options" id="context-backend-options" hidden>
@@ -102,14 +108,6 @@
             <label class="toggle"><input type="checkbox" name="trust_remote_code"> <span>Trust remote code</span></label>
             <label class="toggle"><input type="checkbox" name="disable_cuda_graph"> <span>Disable CUDA graph</span></label>
           </div>
-          <label class="field wide-field">Extra SGLang args
-            <textarea name="extra_sglang_args" rows="3" placeholder="--log-level debug"></textarea>
-          </label>
-        </section>
-
-        <section class="field-group" aria-labelledby="env-heading">
-          <h3 id="env-heading">NCCL environment</h3>
-          <div class="field-grid" id="env-fields"></div>
         </section>
       </form>
 
