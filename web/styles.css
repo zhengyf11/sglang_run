@@ -208,18 +208,21 @@ h3 {
 }
 
 .radio-grid,
-.context-backend-options {
+.context-backend-options,
+.expert-overlap-options {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
 
-.context-backend-options {
+.context-backend-options,
+.expert-overlap-options {
   padding-top: 8px;
   border-top: 1px dashed var(--border);
 }
 
-.context-backend-options .hint {
+.context-backend-options .hint,
+.expert-overlap-options .hint {
   grid-column: 1 / -1;
   font-weight: 800;
 }
@@ -245,6 +248,16 @@ h3 {
 
 .moe-radio-grid {
   grid-template-columns: 1fr;
+}
+
+.expert-overlap-options {
+  grid-template-columns: 1fr;
+}
+
+.expert-overlap-options .compact-toggle {
+  margin-left: 0;
+  padding: 7px 9px;
+  font-size: 0.8rem;
 }
 
 .mtp-field-grid {
