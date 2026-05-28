@@ -30,6 +30,37 @@
           <div class="field-grid" id="model-fields"></div>
         </section>
 
+        <section class="field-group" aria-labelledby="parallel-heading">
+          <h3 id="parallel-heading">Parallel</h3>
+          <div class="parallel-grid">
+            <label class="field parallel-size">TP / EP / PP size
+              <input type="number" name="parallel_tp_size" min="1" autocomplete="off">
+              <span class="hint" data-hint-for="parallel_tp_size"></span>
+            </label>
+            <div class="parallel-card">
+              <p class="parallel-label">Attention stage</p>
+              <div class="radio-grid">
+                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
+                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
+                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="pipeline_parallel"> <span>Pipeline parallel</span></label>
+              </div>
+              <div class="context-backend-options" id="context-backend-options" hidden>
+                <span class="hint">Context backend</span>
+                <label class="radio-option"><input type="radio" name="context_parallel_backend" value="nsa"> <span>NSA prefill CP</span></label>
+                <label class="radio-option"><input type="radio" name="context_parallel_backend" value="prefill"> <span>Prefill CP</span></label>
+              </div>
+            </div>
+            <div class="parallel-card">
+              <p class="parallel-label">MoE stage</p>
+              <div class="radio-grid moe-radio-grid">
+                <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="expert_parallel"> <span>Expert parallel</span></label>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="field-group" aria-labelledby="runtime-heading">
           <div class="section-heading-row">
             <h3 id="runtime-heading">Runtime</h3>
