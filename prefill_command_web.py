@@ -23,6 +23,8 @@ DEFAULTS: dict[str, Any] = {
     "attention_parallel_mode": "tensor",
     "context_parallel_backend": "nsa",
     "moe_parallel_mode": "tensor",
+    "enable_single_batch_overlap": False,
+    "enable_two_batch_overlap": False,
     "tool_call_parser": "glm47",
     "reasoning_parser": "glm45",
     "enable_mtp": False,
@@ -107,6 +109,12 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     raw = {} if payload is None else dict(payload)
     config = {key: (raw[key] if _has_value(raw.get(key)) else value) for key, value in DEFAULTS.items()}
     config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
+    config["enable_single_batch_overlap"] = _to_bool(
+        raw.get("enable_single_batch_overlap"), DEFAULTS["enable_single_batch_overlap"]
+    )
+    config["enable_two_batch_overlap"] = _to_bool(
+        raw.get("enable_two_batch_overlap"), DEFAULTS["enable_two_batch_overlap"]
+    )
     config["trust_remote_code"] = _to_bool(raw.get("trust_remote_code"), DEFAULTS["trust_remote_code"])
     config["disable_cuda_graph"] = _to_bool(raw.get("disable_cuda_graph"), DEFAULTS["disable_cuda_graph"])
     for env_key, default in NCCL_ENV_DEFAULTS.items():
@@ -156,13 +164,14 @@ def build_parallel_args(config: Mapping[str, Any]) -> list[str]:
 
     moe_mode = str(config.get("moe_parallel_mode", "tensor"))
     if moe_mode == "tensor":
-        _append_unique_flag(cmd, "--enable-single-batch-overlap")
-        _append_unique_flag(cmd, "--enable-two-batch-overlap")
+        pass
     elif moe_mode == "expert_parallel":
         cmd.append(f"--ep-size={tp_size}")
         cmd.extend(["--moe-a2a-backend", "deepep"])
-        _append_unique_flag(cmd, "--enable-single-batch-overlap")
-        _append_unique_flag(cmd, "--enable-two-batch-overlap")
+        if config.get("enable_single_batch_overlap"):
+            _append_unique_flag(cmd, "--enable-single-batch-overlap")
+        if config.get("enable_two_batch_overlap"):
+            _append_unique_flag(cmd, "--enable-two-batch-overlap")
     else:
         raise ValueError(f"unsupported moe_parallel_mode: {moe_mode}")
 

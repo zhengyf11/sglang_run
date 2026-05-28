@@ -54,6 +54,8 @@ const enableMtpInput = document.querySelector('#enable-mtp');
 const mtpFields = document.querySelector('#mtp-fields');
 const attentionModeInputs = Array.from(document.querySelectorAll('input[name="attention_parallel_mode"]'));
 const contextBackendOptions = document.querySelector('#context-backend-options');
+const moeModeInputs = Array.from(document.querySelectorAll('input[name="moe_parallel_mode"]'));
+const expertOverlapOptions = document.querySelector('#expert-overlap-options');
 
 function createField({ name, label, type = 'text', wide = false }) {
   const wrapper = document.createElement('label');
@@ -105,6 +107,16 @@ function updateContextBackendVisibility() {
   }
 }
 
+function updateExpertOverlapVisibility() {
+  const selectedMode = moeModeInputs.find((input) => input.checked)?.value;
+  const visible = selectedMode === 'expert_parallel';
+  expertOverlapOptions.hidden = !visible;
+  for (const element of expertOverlapOptions.querySelectorAll('input')) {
+    element.disabled = !visible;
+    if (!visible) element.checked = false;
+  }
+}
+
 function setStatus(message, tone = 'loading') {
   statusText.textContent = message;
   statusDot.className = `status-dot ${tone === 'ready' ? 'ready' : tone === 'error' ? 'error' : ''}`.trim();
@@ -140,6 +152,7 @@ function applyDefaults() {
   }
   updateMtpVisibility();
   updateContextBackendVisibility();
+  updateExpertOverlapVisibility();
 }
 
 function collectPayload() {
@@ -210,6 +223,7 @@ renderFields();
 form.addEventListener('input', (event) => {
   if (event.target === enableMtpInput) updateMtpVisibility();
   if (attentionModeInputs.includes(event.target)) updateContextBackendVisibility();
+  if (moeModeInputs.includes(event.target)) updateExpertOverlapVisibility();
   scheduleRefresh();
 });
 resetButton.addEventListener('click', () => {

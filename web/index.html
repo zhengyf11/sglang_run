@@ -57,6 +57,11 @@
                 <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
                 <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="expert_parallel"> <span>Expert parallel</span></label>
               </div>
+              <div class="expert-overlap-options" id="expert-overlap-options" hidden>
+                <span class="hint">Expert overlap</span>
+                <label class="toggle compact-toggle"><input type="checkbox" name="enable_single_batch_overlap"> <span>Single batch overlap</span></label>
+                <label class="toggle compact-toggle"><input type="checkbox" name="enable_two_batch_overlap"> <span>Two batch overlap</span></label>
+              </div>
             </div>
           </div>
         </section>

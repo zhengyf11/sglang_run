@@ -90,6 +90,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(config["attention_parallel_mode"], "tensor")
         self.assertEqual(config["context_parallel_backend"], "nsa")
         self.assertEqual(config["moe_parallel_mode"], "tensor")
+        self.assertFalse(config["enable_single_batch_overlap"])
+        self.assertFalse(config["enable_two_batch_overlap"])
         self.assertEqual(config["port"], 30000)
 
     def test_dynamic_parameters_override_defaults(self) -> None:
@@ -145,6 +147,8 @@ class CommandGenerationTests(unittest.TestCase):
                 "attention_parallel_mode": "context_parallel",
                 "context_parallel_backend": "prefill",
                 "moe_parallel_mode": "expert_parallel",
+                "enable_single_batch_overlap": True,
+                "enable_two_batch_overlap": True,
             }
         )["command"]
 
@@ -158,7 +162,7 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--moe-a2a-backend") + 1], "deepep")
         self.assertIn("--enable-single-batch-overlap", cmd)
 
-    def test_moe_tensor_parallel_adds_overlap_flags_without_repeating_tp(self) -> None:
+    def test_moe_tensor_parallel_does_not_add_overlap_flags(self) -> None:
         cmd = prefill_command_web.build_command_response(
             {"parallel_tp_size": 8, "moe_parallel_mode": "tensor"}
         )["command"]
@@ -166,12 +170,28 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd.count("--tp-size"), 1)
         self.assertNotIn("--ep-size=8", cmd)
         self.assertNotIn("--moe-a2a-backend", cmd)
-        self.assertIn("--enable-single-batch-overlap", cmd)
-        self.assertEqual(cmd.count("--enable-two-batch-overlap"), 1)
+        self.assertNotIn("--enable-single-batch-overlap", cmd)
+        self.assertNotIn("--enable-two-batch-overlap", cmd)
 
-    def test_moe_expert_parallel_adds_expert_flags_without_repeating_tp(self) -> None:
+    def test_moe_expert_parallel_omits_overlap_flags_by_default(self) -> None:
         cmd = prefill_command_web.build_command_response(
             {"parallel_tp_size": 8, "moe_parallel_mode": "expert_parallel"}
+        )["command"]
+
+        self.assertEqual(cmd.count("--tp-size"), 1)
+        self.assertIn("--ep-size=8", cmd)
+        self.assertEqual(cmd[cmd.index("--moe-a2a-backend") + 1], "deepep")
+        self.assertNotIn("--enable-single-batch-overlap", cmd)
+        self.assertNotIn("--enable-two-batch-overlap", cmd)
+
+    def test_moe_expert_parallel_adds_selected_overlap_flags(self) -> None:
+        cmd = prefill_command_web.build_command_response(
+            {
+                "parallel_tp_size": 8,
+                "moe_parallel_mode": "expert_parallel",
+                "enable_single_batch_overlap": True,
+                "enable_two_batch_overlap": True,
+            }
         )["command"]
 
         self.assertEqual(cmd.count("--tp-size"), 1)
@@ -401,7 +421,12 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('name="context_parallel_backend"', html)
         self.assertIn('id="context-backend-options" hidden', html)
         self.assertIn('name="moe_parallel_mode"', html)
+        self.assertIn('id="expert-overlap-options" hidden', html)
+        self.assertIn('name="enable_single_batch_overlap"', html)
+        self.assertIn('name="enable_two_batch_overlap"', html)
         self.assertIn("updateContextBackendVisibility", js)
+        self.assertIn("updateExpertOverlapVisibility", js)
+        self.assertIn("if (!visible) element.checked = false;", js)
         self.assertNotIn("tensor_parallel_size", js)
 
 
