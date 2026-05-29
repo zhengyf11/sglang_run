@@ -23,6 +23,11 @@ REASONING_PARSER_SOURCE = SGLANG_SOURCE_DIR / "python" / "sglang" / "srt" / "par
 
 UNKNOWN_PARSER = "unknown"
 
+PREFILL_PROFILE = "prefill"
+DECODE_PROFILE = "decode"
+ROUTER_PROFILE = "router"
+SUPPORTED_PROFILES = {PREFILL_PROFILE, DECODE_PROFILE, ROUTER_PROFILE}
+
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
     "served_model_name": "GLM-5.1-FP8",
@@ -57,6 +62,36 @@ DEFAULTS: dict[str, Any] = {
     "chunked_prefill_size": 8192,
     "max_prefill_tokens": 65536,
     "extra_sglang_args": "",
+}
+
+DECODE_DEFAULTS: dict[str, Any] = {
+    **DEFAULTS,
+    "enable_mtp": True,
+    "mem_fraction_static": 0.7,
+    "port": 30001,
+    "dist_init_addr": "192.168.1.233:20000",
+    "disaggregation_mode": "decode",
+    "disable_cuda_graph": False,
+}
+
+ROUTER_DEFAULTS: dict[str, Any] = {
+    "model_path": "/mnt/GLM-5.1-FP8",
+    "served_model_name": "GLM-5.1-FP8",
+    "tool_call_parser": "glm47_moe",
+    "reasoning_parser": "glm45",
+    "prefill": "http://192.168.1.99:30000",
+    "decode": "http://192.168.1.233:30001",
+    "host": "0.0.0.0",
+    "port": 8000,
+    "policy": "cache_aware",
+    "retry_max_retries": 3,
+    "extra_router_args": "",
+}
+
+PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
+    PREFILL_PROFILE: DEFAULTS,
+    DECODE_PROFILE: DECODE_DEFAULTS,
+    ROUTER_PROFILE: ROUTER_DEFAULTS,
 }
 
 NCCL_ENV_DEFAULTS = {
@@ -109,6 +144,19 @@ COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("max_prefill_tokens", "--max-prefill-tokens"),
 )
 
+ROUTER_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
+    ("prefill", "--prefill"),
+    ("decode", "--decode"),
+    ("host", "--host"),
+    ("port", "--port"),
+    ("policy", "--policy"),
+    ("model_path", "--model-path"),
+    ("served_model_name", "--served-model-name"),
+    ("tool_call_parser", "--tool-call-parser"),
+    ("reasoning_parser", "--reasoning-parser"),
+    ("retry_max_retries", "--retry-max-retries"),
+)
+
 PATH_SEGMENTS_TO_IGNORE = {
     "mnt",
     "mount",
@@ -123,7 +171,7 @@ PATH_SEGMENTS_TO_IGNORE = {
 
 TOOL_CALL_PARSER_FALLBACK_CHOICES = (
     UNKNOWN_PARSER,
-    "deepseekv3", "deepseekv31", "deepseekv32", "deepseekv4", "glm", "glm45", "glm47",
+    "deepseekv3", "deepseekv31", "deepseekv32", "deepseekv4", "glm", "glm45", "glm47", "glm47_moe",
     "gpt-oss", "kimi_k2", "lfm2", "llama3", "mimo", "mistral", "poolside_v1", "pythonic",
     "qwen", "qwen25", "qwen3_coder", "step3", "step3p5", "minimax-m2", "trinity",
     "interns1", "hermes", "hunyuan", "gigachat3", "gemma4",
@@ -263,20 +311,42 @@ def get_parser_metadata() -> dict[str, Any]:
     }
 
 
-def get_effective_defaults() -> dict[str, Any]:
+def normalize_profile(profile: Any) -> str:
+    if not _has_value(profile):
+        return PREFILL_PROFILE
+    normalized = str(profile).strip().lower()
+    if normalized not in SUPPORTED_PROFILES:
+        raise ValueError(f"unsupported profile: {profile}")
+    return normalized
+
+
+def get_profile_defaults(profile: str = PREFILL_PROFILE) -> dict[str, Any]:
+    return PROFILE_DEFAULTS[normalize_profile(profile)]
+
+
+def get_effective_defaults(profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     """Return UI/API defaults after applying model-path-derived parser values."""
-    defaults = {**DEFAULTS, **NCCL_ENV_DEFAULTS}
+    normalized_profile = normalize_profile(profile)
+    base_defaults = get_profile_defaults(normalized_profile)
+    defaults = dict(base_defaults)
+    if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE}:
+        defaults.update(NCCL_ENV_DEFAULTS)
     defaults.update(infer_model_parsers(defaults["model_path"]))
+    if normalized_profile == ROUTER_PROFILE:
+        defaults["tool_call_parser"] = base_defaults["tool_call_parser"]
     defaults["served_model_name"] = infer_served_model_name(defaults["model_path"])
     return defaults
 
 
-def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Apply Issue #2 defaults when fields are omitted, blank, or null."""
+def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
+    """Apply profile defaults when fields are omitted, blank, or null."""
+    normalized_profile = normalize_profile(profile)
+    defaults = get_profile_defaults(normalized_profile)
     raw = {} if payload is None else dict(payload)
+    fixed_keys = set(FIXED_FORM_DEFAULT_KEYS)
     config = {
-        key: (raw[key] if key not in FIXED_FORM_DEFAULT_KEYS and _has_value(raw.get(key)) else value)
-        for key, value in DEFAULTS.items()
+        key: (raw[key] if key not in fixed_keys and _has_value(raw.get(key)) else value)
+        for key, value in defaults.items()
     }
 
     if _has_value(raw.get("model_path")) and not _has_value(raw.get("served_model_name")):
@@ -295,21 +365,23 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
         if _has_value(raw.get("reasoning_parser")) and raw["reasoning_parser"] in reasoning_choices
         else inferred_parsers["reasoning_parser"]
     )
+    if normalized_profile == ROUTER_PROFILE and not _has_value(raw.get("tool_call_parser")):
+        config["tool_call_parser"] = defaults["tool_call_parser"]
 
-    config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
-    config["enable_dynamic_chunking"] = _to_bool(
-        raw.get("enable_dynamic_chunking"), DEFAULTS["enable_dynamic_chunking"]
-    )
-    config["enable_single_batch_overlap"] = _to_bool(
-        raw.get("enable_single_batch_overlap"), DEFAULTS["enable_single_batch_overlap"]
-    )
-    config["enable_two_batch_overlap"] = _to_bool(
-        raw.get("enable_two_batch_overlap"), DEFAULTS["enable_two_batch_overlap"]
-    )
-    config["trust_remote_code"] = _to_bool(raw.get("trust_remote_code"), DEFAULTS["trust_remote_code"])
-    config["disable_cuda_graph"] = _to_bool(raw.get("disable_cuda_graph"), DEFAULTS["disable_cuda_graph"])
-    for env_key, default in NCCL_ENV_DEFAULTS.items():
-        config[env_key] = default if env_key in FIXED_FORM_DEFAULT_KEYS else raw[env_key] if _has_value(raw.get(env_key)) else default
+    for bool_key in (
+        "enable_mtp",
+        "enable_dynamic_chunking",
+        "enable_single_batch_overlap",
+        "enable_two_batch_overlap",
+        "trust_remote_code",
+        "disable_cuda_graph",
+    ):
+        if bool_key in defaults:
+            config[bool_key] = _to_bool(raw.get(bool_key), defaults[bool_key])
+
+    if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE}:
+        for env_key, default in NCCL_ENV_DEFAULTS.items():
+            config[env_key] = default if env_key in fixed_keys else raw[env_key] if _has_value(raw.get(env_key)) else default
     return config
 
 
@@ -390,6 +462,22 @@ def build_prefill_command(config: Mapping[str, Any]) -> list[str]:
     return cmd
 
 
+def build_router_command(config: Mapping[str, Any]) -> list[str]:
+    """Build a launch_router command list only; this module never executes it."""
+    cmd = ["python3", "-m", "sglang_router.launch_router", "--pd-disaggregation"]
+    for field, flag in ROUTER_COMMAND_FIELDS:
+        cmd.extend([flag, str(config[field])])
+    cmd.extend(parse_extra_sglang_args(config.get("extra_router_args")))
+    return cmd
+
+
+def build_profile_command(profile: str, config: Mapping[str, Any]) -> list[str]:
+    normalized_profile = normalize_profile(profile)
+    if normalized_profile == ROUTER_PROFILE:
+        return build_router_command(config)
+    return build_prefill_command(config)
+
+
 def build_shell_command(command: Sequence[str]) -> str:
     if len(command) <= 3:
         return shlex.join(command)
@@ -424,21 +512,29 @@ def build_shell_hints(config: Mapping[str, Any]) -> list[str]:
     return []
 
 
-def build_command_response(payload: Mapping[str, Any] | None) -> dict[str, Any]:
-    config = normalize_form_payload(payload)
-    command = build_prefill_command(config)
-    env_exports = build_env_exports(config)
-    shell_hints = build_shell_hints(config)
+def build_resource_limits(profile: str) -> list[str]:
+    return ["ulimit -l unlimited", "ulimit -n 65535"] if normalize_profile(profile) == DECODE_PROFILE else []
+
+
+def build_command_response(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
+    normalized_profile = normalize_profile(profile)
+    config = normalize_form_payload(payload, normalized_profile)
+    command = build_profile_command(normalized_profile, config)
+    resource_limits = build_resource_limits(normalized_profile)
+    env_exports = build_env_exports(config) if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE} else []
+    shell_hints = build_shell_hints(config) if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE} else []
     proxy_unsets = [f"unset {key}" for key in PROXY_ENV_VARS]
     shell_command = build_shell_command(command)
     return {
+        "profile": normalized_profile,
         "config": config,
         "command": command,
         "shell_command": shell_command,
+        "resource_limits": resource_limits,
         "env_exports": env_exports,
         "shell_hints": shell_hints,
         "proxy_unsets": proxy_unsets,
-        "combined_shell": "\n".join([*proxy_unsets, *env_exports, *shell_hints, shell_command]),
+        "combined_shell": "\n".join([*resource_limits, *proxy_unsets, *env_exports, *shell_hints, shell_command]),
         "executed": False,
     }
 
@@ -461,12 +557,18 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
     server_version = "PrefillCommandWeb/1.0"
 
     def do_GET(self) -> None:
-        path = urlparse(self.path).path
+        parsed_url = urlparse(self.path)
+        path = parsed_url.path
         if path == "/api/defaults":
-            self._write_json(
-                HTTPStatus.OK,
-                {"defaults": get_effective_defaults(), "parser_metadata": get_parser_metadata()},
-            )
+            try:
+                query = dict(part.split("=", 1) for part in parsed_url.query.split("&") if part and "=" in part)
+                profile = normalize_profile(query.get("profile"))
+                self._write_json(
+                    HTTPStatus.OK,
+                    {"profile": profile, "defaults": get_effective_defaults(profile), "parser_metadata": get_parser_metadata()},
+                )
+            except ValueError as exc:
+                self._write_json(HTTPStatus.BAD_REQUEST, {"error": str(exc)})
             return
         try:
             body, content_type = read_static_asset(path)
@@ -485,7 +587,8 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
             payload = json.loads(body)
             if not isinstance(payload, dict):
                 raise ValueError("JSON body must be an object")
-            response = build_command_response(payload)
+            profile = normalize_profile(payload.pop("profile", PREFILL_PROFILE))
+            response = build_command_response(payload, profile)
         except json.JSONDecodeError as exc:
             self._write_json(HTTPStatus.BAD_REQUEST, {"error": f"invalid JSON: {exc.msg}"})
             return

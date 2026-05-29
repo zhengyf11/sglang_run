@@ -3,125 +3,203 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>SGLang Prefill Command Generator</title>
+  <title>SGLang Command Generator</title>
   <link rel="stylesheet" href="/styles.css">
   <script src="/app.js" type="module" defer></script>
 </head>
 <body>
   <div class="shell">
+    <nav class="profile-switcher" aria-label="Command profile">
+      <button class="profile-button active" type="button" data-profile-button="prefill">Prefill</button>
+      <button class="profile-button" type="button" data-profile-button="decode">Decode</button>
+      <button class="profile-button" type="button" data-profile-button="router">Router</button>
+    </nav>
+
     <main class="layout">
-      <form id="command-form" class="panel form-panel">
-        <div class="panel-heading">
-          <div>
-            <p class="eyebrow">Configuration</p>
-            <h2>Prefill parameters</h2>
-          </div>
-          <div class="panel-actions">
-            <div class="status-card" aria-live="polite">
-              <span class="status-dot" id="status-dot"></span>
-              <span id="status-text">Loading defaults…</span>
+      <section class="profile-panel" data-profile-panel="prefill">
+        <form id="prefill-command-form" class="panel form-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Configuration</p>
+              <h2>Prefill parameters</h2>
             </div>
-            <button class="secondary-button" type="button" id="reset-button">Reset defaults</button>
+            <div class="panel-actions">
+              <div class="status-card" aria-live="polite">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">Loading defaults…</span>
+              </div>
+              <button class="secondary-button" type="button" id="reset-button">Reset defaults</button>
+            </div>
           </div>
-        </div>
 
-        <section class="field-group" aria-labelledby="model-heading">
-          <h3 id="model-heading">Model</h3>
-          <div class="field-grid" id="model-fields"></div>
-        </section>
+          <section class="field-group" aria-labelledby="prefill-model-heading">
+            <h3 id="prefill-model-heading">Model</h3>
+            <div class="field-grid" data-profile-fields="prefill:model"></div>
+          </section>
 
-        <section class="field-group" aria-labelledby="parallel-heading">
-          <h3 id="parallel-heading">Parallel</h3>
-          <div class="parallel-grid">
-            <label class="field parallel-size">world size
-              <input type="number" name="parallel_tp_size" min="1" autocomplete="off">
-              <span class="hint" data-hint-for="parallel_tp_size"></span>
-            </label>
-            <div class="parallel-card">
-              <p class="parallel-label">Attention stage</p>
-              <div class="attention-options">
-                <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
-                <div class="attention-option-stack">
-                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
-                  <label class="field compact-field dp-size-field" id="dp-size-field" hidden>dp-size
-                    <input type="number" name="dp_size" min="1" autocomplete="off" disabled>
-                    <span class="hint" data-hint-for="dp_size"></span>
-                  </label>
-                </div>
-                <div class="attention-option-stack">
-                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
-                  <div class="context-backend-options" id="context-backend-options" hidden>
-                    <span class="hint">Context backend</span>
-                    <label class="radio-option"><input type="radio" name="context_parallel_backend" value="nsa"> <span>NSA prefill CP</span></label>
-                    <label class="radio-option"><input type="radio" name="context_parallel_backend" value="prefill"> <span>Prefill CP</span></label>
+          <section class="field-group" aria-labelledby="prefill-parallel-heading">
+            <h3 id="prefill-parallel-heading">Parallel</h3>
+            <div class="parallel-grid">
+              <label class="field parallel-size">world size
+                <input type="number" name="parallel_tp_size" min="1" autocomplete="off">
+                <span class="hint" data-hint-for="parallel_tp_size"></span>
+              </label>
+              <div class="parallel-card">
+                <p class="parallel-label">Attention stage</p>
+                <div class="attention-options">
+                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                  <div class="attention-option-stack">
+                    <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
+                    <label class="field compact-field dp-size-field" data-dp-size-field hidden>dp-size
+                      <input type="number" name="dp_size" min="1" autocomplete="off" disabled>
+                      <span class="hint" data-hint-for="dp_size"></span>
+                    </label>
+                  </div>
+                  <div class="attention-option-stack">
+                    <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="context_parallel"> <span>Context parallel</span></label>
+                    <div class="context-backend-options" data-context-backend-options hidden>
+                      <span class="hint">Context backend</span>
+                      <label class="radio-option"><input type="radio" name="context_parallel_backend" value="nsa"> <span>NSA prefill CP</span></label>
+                      <label class="radio-option"><input type="radio" name="context_parallel_backend" value="prefill"> <span>Prefill CP</span></label>
+                    </div>
+                  </div>
+                  <div class="attention-option-stack">
+                    <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="pipeline_parallel"> <span>Pipeline parallel</span></label>
+                    <div class="pipeline-options" data-pipeline-options hidden>
+                      <label class="toggle compact-toggle"><input type="checkbox" name="enable_dynamic_chunking"> <span>--enable-dynamic-chunking</span></label>
+                      <label class="field compact-field">SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR
+                        <input type="text" name="dynamic_chunking_smooth_factor" autocomplete="off">
+                        <span class="hint" data-hint-for="dynamic_chunking_smooth_factor"></span>
+                      </label>
+                    </div>
                   </div>
                 </div>
-                <div class="attention-option-stack">
-                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="pipeline_parallel"> <span>Pipeline parallel</span></label>
-                  <div class="pipeline-options" id="pipeline-options" hidden>
-                    <label class="toggle compact-toggle"><input type="checkbox" name="enable_dynamic_chunking"> <span>--enable-dynamic-chunking</span></label>
-                    <label class="field compact-field">SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR
-                      <input type="text" name="dynamic_chunking_smooth_factor" autocomplete="off">
-                      <span class="hint" data-hint-for="dynamic_chunking_smooth_factor"></span>
+              </div>
+              <div class="parallel-card">
+                <p class="parallel-label">MoE stage</p>
+                <div class="radio-grid moe-radio-grid">
+                  <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                  <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="expert_parallel"> <span>Expert parallel</span></label>
+                </div>
+                <div class="expert-overlap-options" data-expert-overlap-options hidden>
+                  <span class="hint">Expert overlap</span>
+                  <label class="toggle compact-toggle"><input type="checkbox" name="enable_single_batch_overlap"> <span>Single batch overlap</span></label>
+                  <label class="toggle compact-toggle"><input type="checkbox" name="enable_two_batch_overlap"> <span>Two batch overlap</span></label>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="field-group" aria-labelledby="prefill-runtime-heading">
+            <div class="section-heading-row">
+              <h3 id="prefill-runtime-heading">Runtime</h3>
+              <label class="toggle compact-toggle"><input type="checkbox" name="enable_mtp"> <span>打开 MTP</span></label>
+            </div>
+            <div class="field-grid" data-profile-fields="prefill:runtime"></div>
+            <div class="field-grid mtp-field-grid" data-profile-fields="prefill:mtp" data-mtp-fields hidden></div>
+          </section>
+
+          <section class="field-group" aria-labelledby="prefill-disaggregation-heading">
+            <h3 id="prefill-disaggregation-heading">Disaggregation</h3>
+            <div class="field-grid" data-profile-fields="prefill:disaggregation"></div>
+          </section>
+
+          <section class="field-group" aria-labelledby="prefill-limits-heading">
+            <h3 id="prefill-limits-heading">Limits</h3>
+            <div class="field-grid" data-profile-fields="prefill:limits"></div>
+          </section>
+
+          <section class="field-group" aria-labelledby="prefill-flags-heading">
+            <h3 id="prefill-flags-heading">Flags & extras</h3>
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" name="trust_remote_code"> <span>Trust remote code</span></label>
+              <label class="toggle"><input type="checkbox" name="disable_cuda_graph"> <span>Disable CUDA graph</span></label>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <section class="profile-panel" data-profile-panel="decode" hidden>
+        <form id="decode-command-form" class="panel form-panel">
+          <div class="panel-heading"><div><p class="eyebrow">Configuration</p><h2>Decode parameters</h2></div></div>
+          <section class="field-group" aria-labelledby="decode-model-heading">
+            <h3 id="decode-model-heading">Model</h3>
+            <div class="field-grid" data-profile-fields="decode:model"></div>
+          </section>
+          <section class="field-group" aria-labelledby="decode-parallel-heading">
+            <h3 id="decode-parallel-heading">Parallel</h3>
+            <div class="parallel-grid">
+              <label class="field parallel-size">world size
+                <input type="number" name="parallel_tp_size" min="1" autocomplete="off">
+                <span class="hint" data-hint-for="parallel_tp_size"></span>
+              </label>
+              <div class="parallel-card">
+                <p class="parallel-label">Attention stage</p>
+                <div class="attention-options">
+                  <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                  <div class="attention-option-stack">
+                    <label class="radio-option"><input type="radio" name="attention_parallel_mode" value="dp_attention"> <span>DP attention</span></label>
+                    <label class="field compact-field dp-size-field" data-dp-size-field hidden>dp-size
+                      <input type="number" name="dp_size" min="1" autocomplete="off" disabled>
+                      <span class="hint" data-hint-for="dp_size"></span>
                     </label>
                   </div>
                 </div>
               </div>
-            </div>
-            <div class="parallel-card">
-              <p class="parallel-label">MoE stage</p>
-              <div class="radio-grid moe-radio-grid">
-                <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
-                <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="expert_parallel"> <span>Expert parallel</span></label>
+              <div class="parallel-card">
+                <p class="parallel-label">MoE stage</p>
+                <div class="radio-grid moe-radio-grid">
+                  <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="tensor"> <span>Tensor parallel</span></label>
+                  <label class="radio-option"><input type="radio" name="moe_parallel_mode" value="expert_parallel"> <span>Expert parallel</span></label>
+                </div>
+                <div class="expert-overlap-options" data-expert-overlap-options hidden>
+                  <span class="hint">Expert overlap</span>
+                  <label class="toggle compact-toggle"><input type="checkbox" name="enable_single_batch_overlap"> <span>Single batch overlap</span></label>
+                  <label class="toggle compact-toggle"><input type="checkbox" name="enable_two_batch_overlap"> <span>Two batch overlap</span></label>
+                </div>
               </div>
-              <div class="expert-overlap-options" id="expert-overlap-options" hidden>
-                <span class="hint">Expert overlap</span>
-                <label class="toggle compact-toggle"><input type="checkbox" name="enable_single_batch_overlap"> <span>Single batch overlap</span></label>
-                <label class="toggle compact-toggle"><input type="checkbox" name="enable_two_batch_overlap"> <span>Two batch overlap</span></label>
-              </div>
             </div>
-          </div>
-        </section>
+          </section>
+          <section class="field-group" aria-labelledby="decode-runtime-heading">
+            <div class="section-heading-row"><h3 id="decode-runtime-heading">Runtime</h3><label class="toggle compact-toggle"><input type="checkbox" name="enable_mtp"> <span>打开 MTP</span></label></div>
+            <div class="field-grid" data-profile-fields="decode:runtime"></div>
+            <div class="field-grid mtp-field-grid" data-profile-fields="decode:mtp" data-mtp-fields hidden></div>
+          </section>
+          <section class="field-group" aria-labelledby="decode-disaggregation-heading">
+            <h3 id="decode-disaggregation-heading">Disaggregation</h3>
+            <div class="field-grid" data-profile-fields="decode:disaggregation"></div>
+          </section>
+          <section class="field-group" aria-labelledby="decode-flags-heading">
+            <h3 id="decode-flags-heading">Flags</h3>
+            <div class="toggle-row"><label class="toggle"><input type="checkbox" name="trust_remote_code"> <span>Trust remote code</span></label></div>
+          </section>
+        </form>
+      </section>
 
-        <section class="field-group" aria-labelledby="runtime-heading">
-          <div class="section-heading-row">
-            <h3 id="runtime-heading">Runtime</h3>
-            <label class="toggle compact-toggle"><input type="checkbox" name="enable_mtp" id="enable-mtp"> <span>打开 MTP</span></label>
-          </div>
-          <div class="field-grid" id="runtime-fields"></div>
-          <div class="field-grid mtp-field-grid" id="mtp-fields" hidden></div>
-        </section>
-
-        <section class="field-group" aria-labelledby="disaggregation-heading">
-          <h3 id="disaggregation-heading">Disaggregation</h3>
-          <div class="field-grid" id="disaggregation-fields"></div>
-        </section>
-
-        <section class="field-group" aria-labelledby="limits-heading">
-          <h3 id="limits-heading">Limits</h3>
-          <div class="field-grid" id="limit-fields"></div>
-        </section>
-
-        <section class="field-group" aria-labelledby="flags-heading">
-          <h3 id="flags-heading">Flags & extras</h3>
-          <div class="toggle-row">
-            <label class="toggle"><input type="checkbox" name="trust_remote_code"> <span>Trust remote code</span></label>
-            <label class="toggle"><input type="checkbox" name="disable_cuda_graph"> <span>Disable CUDA graph</span></label>
-          </div>
-        </section>
-      </form>
+      <section class="profile-panel" data-profile-panel="router" hidden>
+        <form id="router-command-form" class="panel form-panel">
+          <div class="panel-heading"><div><p class="eyebrow">Configuration</p><h2>Router parameters</h2></div></div>
+          <section class="field-group" aria-labelledby="router-model-heading">
+            <h3 id="router-model-heading">Model</h3>
+            <div class="field-grid" data-profile-fields="router:model"></div>
+          </section>
+          <section class="field-group" aria-labelledby="router-endpoints-heading">
+            <h3 id="router-endpoints-heading">P/D endpoints</h3>
+            <div class="field-grid" data-profile-fields="router:endpoints"></div>
+          </section>
+          <section class="field-group" aria-labelledby="router-runtime-heading">
+            <h3 id="router-runtime-heading">Runtime</h3>
+            <div class="field-grid" data-profile-fields="router:runtime"></div>
+          </section>
+        </form>
+      </section>
 
       <aside class="panel output-panel">
         <div class="panel-heading output-heading">
-          <div>
-            <p class="eyebrow">Generated output</p>
-            <h2>Full shell</h2>
-          </div>
+          <div><p class="eyebrow">Generated output</p><h2>Full shell</h2></div>
           <button class="copy-button" type="button" data-copy-target="combined-output">Copy</button>
         </div>
-
         <pre id="combined-output" class="code-output" tabindex="0"></pre>
-
         <div id="error-box" class="error-box" role="alert" hidden></div>
       </aside>
     </main>
