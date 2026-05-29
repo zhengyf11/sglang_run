@@ -27,7 +27,6 @@ const profileConfigs = {
         { name: 'disaggregation_ib_device', label: 'IB devices', wide: true },
       ],
       limits: [
-        { name: 'max_running_requests', label: 'Max running requests', type: 'number' },
         { name: 'chunked_prefill_size', label: 'Chunked prefill size', type: 'number' },
         { name: 'max_prefill_tokens', label: 'Max prefill tokens', type: 'number' },
       ],
@@ -52,6 +51,10 @@ const profileConfigs = {
         { name: 'dist_init_addr', label: 'Dist init address' },
         { name: 'disaggregation_transfer_backend', label: 'Transfer backend' },
         { name: 'disaggregation_ib_device', label: 'IB devices', wide: true },
+      ],
+      limits: [
+        { name: 'max_running_requests', label: 'Max running requests', type: 'number' },
+        { name: 'cuda_graph_max_bs', label: 'Cuda graph max bs', type: 'number' },
       ],
     },
   },

@@ -58,7 +58,6 @@ DEFAULTS: dict[str, Any] = {
     "disaggregation_ib_device": "mlx5_bond_0,mlx5_bond_1,mlx5_bond_2,mlx5_bond_3,mlx5_bond_4,mlx5_bond_5,mlx5_bond_6,mlx5_bond_7",
     "trust_remote_code": True,
     "disable_cuda_graph": True,
-    "max_running_requests": 128,
     "chunked_prefill_size": 8192,
     "max_prefill_tokens": 65536,
     "extra_sglang_args": "",
@@ -72,6 +71,8 @@ DECODE_DEFAULTS: dict[str, Any] = {
     "dist_init_addr": "192.168.1.233:20000",
     "disaggregation_mode": "decode",
     "disable_cuda_graph": False,
+    "max_running_requests": 128,
+    "cuda_graph_max_bs": 128,
 }
 
 ROUTER_DEFAULTS: dict[str, Any] = {
@@ -139,9 +140,13 @@ COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("disaggregation_mode", "--disaggregation-mode"),
     ("disaggregation_transfer_backend", "--disaggregation-transfer-backend"),
     ("disaggregation_ib_device", "--disaggregation-ib-device"),
-    ("max_running_requests", "--max-running-requests"),
     ("chunked_prefill_size", "--chunked-prefill-size"),
     ("max_prefill_tokens", "--max-prefill-tokens"),
+)
+
+DECODE_LIMIT_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
+    ("max_running_requests", "--max-running-requests"),
+    ("cuda_graph_max_bs", "--cuda-graph-max-bs"),
 )
 
 ROUTER_COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
@@ -444,10 +449,12 @@ def build_parallel_args(config: Mapping[str, Any]) -> list[str]:
     return cmd
 
 
-def build_prefill_command(config: Mapping[str, Any]) -> list[str]:
+def build_prefill_command(
+    config: Mapping[str, Any], extra_command_fields: Sequence[tuple[str, str]] = ()
+) -> list[str]:
     """Build a launch_server command list only; this module never executes it."""
     cmd = ["python3", "-m", "sglang.launch_server"]
-    for field, flag in COMMAND_FIELDS:
+    for field, flag in (*COMMAND_FIELDS, *extra_command_fields):
         cmd.extend([flag, str(config[field])])
         if field == "served_model_name":
             cmd.extend(build_parallel_args(config))
@@ -475,6 +482,8 @@ def build_profile_command(profile: str, config: Mapping[str, Any]) -> list[str]:
     normalized_profile = normalize_profile(profile)
     if normalized_profile == ROUTER_PROFILE:
         return build_router_command(config)
+    if normalized_profile == DECODE_PROFILE:
+        return build_prefill_command(config, DECODE_LIMIT_COMMAND_FIELDS)
     return build_prefill_command(config)
 
 
