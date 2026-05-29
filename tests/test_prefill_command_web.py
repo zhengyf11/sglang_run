@@ -403,6 +403,54 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertIn("unset http_proxy", response["proxy_unsets"])
         self.assertIn("unset HTTPS_PROXY", response["proxy_unsets"])
 
+    def test_decode_profile_builds_issue_5_command_and_combined_shell(self) -> None:
+        response = prefill_command_web.build_command_response({}, profile="decode")
+        cmd = response["command"]
+
+        self.assertEqual(response["profile"], "decode")
+        self.assertEqual(cmd[:3], ["python3", "-m", "sglang.launch_server"])
+        self.assertEqual(cmd[cmd.index("--port") + 1], "30001")
+        self.assertEqual(cmd[cmd.index("--disaggregation-mode") + 1], "decode")
+        self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.7")
+        self.assertIn("--speculative-algorithm", cmd)
+        self.assertIn("--trust-remote-code", cmd)
+        self.assertNotIn("--disable-cuda-graph", cmd)
+        self.assertIn("ulimit -l unlimited", response["combined_shell"])
+        self.assertIn("unset http_proxy", response["combined_shell"])
+        self.assertIn("export NCCL_IB_GID_INDEX=3", response["combined_shell"])
+
+    def test_decode_disaggregation_mode_is_fixed(self) -> None:
+        response = prefill_command_web.build_command_response({"disaggregation_mode": "prefill"}, profile="decode")
+
+        self.assertEqual(response["config"]["disaggregation_mode"], "decode")
+        self.assertEqual(response["command"][response["command"].index("--disaggregation-mode") + 1], "decode")
+
+    def test_router_profile_builds_issue_8_command_without_nccl_exports(self) -> None:
+        response = prefill_command_web.build_command_response({}, profile="router")
+        cmd = response["command"]
+
+        self.assertEqual(response["profile"], "router")
+        self.assertEqual(cmd[:4], ["python3", "-m", "sglang_router.launch_router", "--pd-disaggregation"])
+        self.assertEqual(cmd[cmd.index("--prefill") + 1], "http://192.168.1.99:30000")
+        self.assertEqual(cmd[cmd.index("--decode") + 1], "http://192.168.1.233:30001")
+        self.assertEqual(cmd[cmd.index("--port") + 1], "8000")
+        self.assertEqual(cmd[cmd.index("--policy") + 1], "cache_aware")
+        self.assertEqual(cmd[cmd.index("--tool-call-parser") + 1], "glm47_moe")
+        self.assertEqual(cmd[cmd.index("--reasoning-parser") + 1], "glm45")
+        self.assertEqual(cmd[cmd.index("--retry-max-retries") + 1], "3")
+        self.assertIn("unset http_proxy", response["combined_shell"])
+        self.assertNotIn("NCCL_IB_GID_INDEX", response["combined_shell"])
+
+    def test_router_profile_allows_endpoint_overrides(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {"prefill": "http://127.0.0.1:30000", "decode": "http://127.0.0.1:30001"},
+            profile="router",
+        )
+        cmd = response["command"]
+
+        self.assertEqual(cmd[cmd.index("--prefill") + 1], "http://127.0.0.1:30000")
+        self.assertEqual(cmd[cmd.index("--decode") + 1], "http://127.0.0.1:30001")
+
 
 class HandlerTests(unittest.TestCase):
     def _make_handler(self, method: str, path: str, body: bytes = b"") -> prefill_command_web.PrefillCommandHandler:
@@ -435,8 +483,13 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("200", status_line)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertNotIn("Location", headers)
-        self.assertIn("<form id=\"command-form\"", html)
-        self.assertIn("SGLang Prefill Command Generator", html)
+        self.assertIn('<form id="prefill-command-form"', html)
+        self.assertIn('<form id="decode-command-form"', html)
+        self.assertIn('<form id="router-command-form"', html)
+        self.assertIn('data-profile-button="prefill"', html)
+        self.assertIn('data-profile-button="decode"', html)
+        self.assertIn('data-profile-button="router"', html)
+        self.assertIn("SGLang Command Generator", html)
         self.assertIn("href=\"/styles.css\"", html)
         self.assertIn("src=\"/app.js\"", html)
         self.assertNotIn("<style>", html)
@@ -487,6 +540,26 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "unknown")
         self.assertEqual(body["parser_metadata"]["fallbacks"]["reasoning_parser"], "unknown")
 
+    def test_get_defaults_supports_decode_and_router_profiles(self) -> None:
+        for profile, expected_port in (("decode", 30001), ("router", 8000)):
+            with self.subTest(profile=profile):
+                handler = self._make_handler("GET", f"/api/defaults?profile={profile}")
+
+                handler.do_GET()
+                body = self._json_response(handler)
+
+                self.assertEqual(body["profile"], profile)
+                self.assertEqual(body["defaults"]["port"], expected_port)
+
+    def test_get_defaults_rejects_unknown_profile(self) -> None:
+        handler = self._make_handler("GET", "/api/defaults?profile=bad")
+
+        handler.do_GET()
+        response = handler.wfile.getvalue().decode("utf-8")
+
+        self.assertIn("400", response.splitlines()[0])
+        self.assertIn("unsupported profile", response)
+
     def test_post_api_command_returns_shell_command(self) -> None:
         handler = self._make_handler(
             "POST",
@@ -500,6 +573,21 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("shell_command", body)
         self.assertIn("--model-path /models/custom", body["shell_command"])
         self.assertFalse(body["executed"])
+
+    def test_post_api_command_supports_router_profile(self) -> None:
+        handler = self._make_handler(
+            "POST",
+            "/api/command",
+            json.dumps({"profile": "router", "prefill": "http://p:30000", "decode": "http://d:30001"}).encode("utf-8"),
+        )
+
+        handler.do_POST()
+        body = self._json_response(handler)
+
+        self.assertEqual(body["profile"], "router")
+        self.assertIn("sglang_router.launch_router", body["shell_command"])
+        self.assertIn("--prefill http://p:30000", body["shell_command"])
+        self.assertIn("--decode http://d:30001", body["shell_command"])
 
     def test_invalid_json_returns_400(self) -> None:
         handler = self._make_handler("POST", "/api/command", b"{")
@@ -530,24 +618,24 @@ class WebUiStaticTests(unittest.TestCase):
         css = Path("web/styles.css").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
 
-        self.assertIn('id="enable-mtp"', html)
-        self.assertNotIn('id="enable-mtp" checked', html)
-        self.assertIn('id="mtp-fields" hidden', html)
+        self.assertIn('name="enable_mtp"', html)
+        self.assertNotIn('name="enable_mtp" checked', html)
+        self.assertIn('data-mtp-fields hidden', html)
         self.assertRegex(css, r"\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}")
         self.assertIn("mtpFields.hidden = !enabled;", js)
-        self.assertIn("element.disabled = !enabled;", js)
-        self.assertIn("if (event.target === enableMtpInput) updateMtpVisibility();", js)
+        self.assertIn("element.disabled = !enabled", js)
+        self.assertIn("if (event.target.name === 'enable_mtp') updateMtpVisibility(profile);", js)
 
     def test_parallel_section_uses_radio_groups_and_hides_context_backend_until_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
         css = Path("web/styles.css").read_text(encoding="utf-8")
 
-        self.assertIn('id="parallel-heading"', html)
+        self.assertIn('id="prefill-parallel-heading"', html)
         self.assertIn('world size', html)
         self.assertNotIn('TP / EP / PP size', html)
         self.assertIn('name="parallel_tp_size"', html)
-        self.assertIn('id="dp-size-field" hidden', html)
+        self.assertIn('data-dp-size-field hidden', html)
         self.assertIn('name="dp_size"', html)
         self.assertIn('name="attention_parallel_mode"', html)
         self.assertIn('value="dp_attention"', html)
@@ -555,14 +643,14 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('value="pipeline_parallel"', html)
         self.assertIn('class="attention-option-stack"', html)
         self.assertIn('name="context_parallel_backend"', html)
-        self.assertIn('id="context-backend-options" hidden', html)
+        self.assertIn('data-context-backend-options hidden', html)
         self.assertIn('name="moe_parallel_mode"', html)
-        self.assertIn('id="expert-overlap-options" hidden', html)
+        self.assertIn('data-expert-overlap-options hidden', html)
         self.assertIn('name="enable_single_batch_overlap"', html)
         self.assertIn('name="enable_two_batch_overlap"', html)
         self.assertIn("updateContextBackendVisibility", js)
         self.assertIn("updateDpSizeVisibility", js)
-        self.assertIn("dpSizeInput.value = worldSizeInput.value || state.defaults.parallel_tp_size || '';", js)
+        self.assertIn("dpSizeInput.value = worldSizeInput.value || defaults.parallel_tp_size || '';", js)
         self.assertIn("updateExpertOverlapVisibility", js)
         self.assertIn("if (!visible) element.checked = false;", js)
         self.assertIn(".context-backend-options .radio-option", css)
@@ -595,23 +683,42 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertNotIn("{ name: 'disaggregation_mode', label: 'Mode' }", js)
         self.assertNotIn('name="disaggregation_mode"', html)
         self.assertIn("syncModelDerivedDefaults", js)
-        self.assertIn("syncModelDerivedDefaults(form.querySelector('input[name=\"model_path\"]')?.value || state.defaults.model_path || '');", js)
+        self.assertIn("syncModelDerivedDefaults(form.querySelector('input[name=\"model_path\"]')?.value || defaults.model_path || '', profile);", js)
         self.assertIn("identifyButton.textContent = '识别模型';", js)
-        self.assertIn("identifyModelButton?.addEventListener('click'", js)
-        self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '');", js)
-        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value);", js)
+        self.assertIn("event.target.closest('[data-identify-model]')", js)
+        self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '', profile);", js)
+        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, profile);", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
 
-        self.assertIn('id="pipeline-options" hidden', html)
+        self.assertIn('data-pipeline-options hidden', html)
         self.assertIn('name="enable_dynamic_chunking"', html)
         self.assertIn('name="dynamic_chunking_smooth_factor"', html)
         self.assertIn('SGLANG_DYNAMIC_CHUNKING_SMOOTH_FACTOR', html)
         self.assertIn("updatePipelineOptionsVisibility", js)
         self.assertIn("pipelineOptions.hidden = !visible;", js)
         self.assertIn("element.disabled = !visible;", js)
+
+    def test_prefill_decode_router_are_independent_profile_forms(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="prefill-command-form"', html)
+        self.assertIn('id="decode-command-form"', html)
+        self.assertIn('id="router-command-form"', html)
+        self.assertIn('data-profile-button="prefill"', html)
+        self.assertIn('data-profile-button="decode"', html)
+        self.assertIn('data-profile-button="router"', html)
+        self.assertIn("const profileConfigs", js)
+        self.assertIn("const payload = { profile: state.activeProfile };", js)
+        self.assertIn("for (const element of activeForm().elements)", js)
+        self.assertIn("switchProfile", js)
+        self.assertIn("/api/defaults?profile=", js)
+        self.assertIn(".profile-switcher", css)
+        self.assertIn(".profile-button.active", css)
 
 
 class ReadmeDocumentationTests(unittest.TestCase):
