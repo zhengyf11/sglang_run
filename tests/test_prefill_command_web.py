@@ -488,6 +488,55 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--prefill") + 1], "http://127.0.0.1:30000")
         self.assertEqual(cmd[cmd.index("--decode") + 1], "http://127.0.0.1:30001")
 
+    def test_docker_run_profile_builds_default_keepalive_command(self) -> None:
+        response = prefill_command_web.build_command_response({}, profile="docker_run")
+        cmd = response["command"]
+
+        self.assertEqual(response["profile"], "docker_run")
+        self.assertEqual(cmd[:4], ["docker", "run", "--rm", "-d"])
+        self.assertIn("--user=0", cmd)
+        self.assertIn("--privileged", cmd)
+        self.assertIn("--ipc=host", cmd)
+        self.assertEqual(cmd[cmd.index("--network") + 1], "host")
+        self.assertIn("--runtime=nvidia", cmd)
+        self.assertEqual(cmd[cmd.index("--gpus") + 1], "all")
+        self.assertEqual(cmd[cmd.index("--ulimit") + 1], "memlock=-1:-1")
+        self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
+        self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
+        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
+        self.assertEqual(cmd[-3:], ["lmsysorg/sglang:latest", "-lc", "tail -f /dev/null"])
+        self.assertFalse(response["executed"])
+        self.assertEqual(response["resource_limits"], [])
+        self.assertEqual(response["env_exports"], [])
+
+    def test_docker_run_profile_supports_dynamic_fields(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {
+                "image": "custom/sglang:test",
+                "container_name": "custom-name",
+                "shm_size": "16g",
+                "rm": False,
+                "volume": "/data/models:/models:ro\n/data/cache:/cache\n",
+                "env": "HF_HOME=/cache\nTOKEN=value with spaces",
+                "docker_arg": "--cap-add=SYS_ADMIN\n--security-opt=seccomp=unconfined",
+                "model_path": "/should/not/be/used",
+            },
+            profile="docker_run",
+        )
+        cmd = response["command"]
+
+        self.assertNotIn("--rm", cmd)
+        self.assertEqual(cmd[cmd.index("--name") + 1], "custom-name")
+        self.assertEqual(cmd[cmd.index("--shm-size") + 1], "16g")
+        self.assertIn("/data/models:/models:ro", cmd)
+        self.assertIn("/data/cache:/cache", cmd)
+        self.assertIn("HF_HOME=/cache", cmd)
+        self.assertIn("TOKEN=value with spaces", cmd)
+        self.assertIn("--cap-add=SYS_ADMIN", cmd)
+        self.assertIn("--security-opt=seccomp=unconfined", cmd)
+        self.assertEqual(cmd[-3:], ["custom/sglang:test", "-lc", "tail -f /dev/null"])
+        self.assertNotIn("/should/not/be/used", cmd)
+
 
 class HandlerTests(unittest.TestCase):
     def _make_handler(self, method: str, path: str, body: bytes = b"") -> prefill_command_web.PrefillCommandHandler:
@@ -521,9 +570,11 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertNotIn("Location", headers)
         self.assertIn('<form id="shared-model-form"', html)
+        self.assertIn('<form id="docker-run-command-form"', html)
         self.assertIn('<form id="prefill-command-form"', html)
         self.assertIn('<form id="decode-command-form"', html)
         self.assertIn('<form id="router-command-form"', html)
+        self.assertIn('data-profile-button="docker_run"', html)
         self.assertIn('data-profile-button="prefill"', html)
         self.assertIn('data-profile-button="decode"', html)
         self.assertIn('data-profile-button="router"', html)
@@ -578,8 +629,13 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "unknown")
         self.assertEqual(body["parser_metadata"]["fallbacks"]["reasoning_parser"], "unknown")
 
-    def test_get_defaults_supports_decode_and_router_profiles(self) -> None:
-        for profile, expected_port in (("decode", 30001), ("router", 8000)):
+    def test_get_defaults_supports_decode_router_and_docker_run_profiles(self) -> None:
+        profile_expectations = (
+            ("decode", "port", 30001),
+            ("router", "port", 8000),
+            ("docker_run", "image", "lmsysorg/sglang:latest"),
+        )
+        for profile, key, expected_value in profile_expectations:
             with self.subTest(profile=profile):
                 handler = self._make_handler("GET", f"/api/defaults?profile={profile}")
 
@@ -587,7 +643,7 @@ class HandlerTests(unittest.TestCase):
                 body = self._json_response(handler)
 
                 self.assertEqual(body["profile"], profile)
-                self.assertEqual(body["defaults"]["port"], expected_port)
+                self.assertEqual(body["defaults"][key], expected_value)
 
     def test_get_defaults_rejects_unknown_profile(self) -> None:
         handler = self._make_handler("GET", "/api/defaults?profile=bad")
@@ -626,6 +682,21 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("sglang_router.launch_router", body["shell_command"])
         self.assertIn("--prefill http://p:30000", body["shell_command"])
         self.assertIn("--decode http://d:30001", body["shell_command"])
+
+    def test_post_api_command_supports_docker_run_profile(self) -> None:
+        handler = self._make_handler(
+            "POST",
+            "/api/command",
+            json.dumps({"profile": "docker_run", "image": "custom/sglang:test"}).encode("utf-8"),
+        )
+
+        handler.do_POST()
+        body = self._json_response(handler)
+
+        self.assertEqual(body["profile"], "docker_run")
+        self.assertIn("docker run", body["shell_command"])
+        self.assertIn("custom/sglang:test", body["shell_command"])
+        self.assertFalse(body["executed"])
 
     def test_invalid_json_returns_400(self) -> None:
         handler = self._make_handler("POST", "/api/command", b"{")
@@ -777,7 +848,7 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('data-profile-button="router"', html)
         self.assertIn("const profileConfigs", js)
         self.assertIn("const payload = { profile: state.activeProfile };", js)
-        self.assertIn("for (const form of [sharedModelForm, activeForm()])", js)
+        self.assertIn("const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];", js)
         self.assertIn("for (const element of form.elements)", js)
         self.assertIn("switchProfile", js)
         self.assertIn("/api/defaults?profile=", js)
@@ -818,6 +889,48 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("limits: [\n        { name: 'max_running_requests', label: 'Max running requests', type: 'number' },\n        { name: 'cuda_graph_max_bs', label: 'Cuda graph max bs', type: 'number' },\n      ],", js)
         self.assertEqual(js.count("name: 'max_running_requests'"), 1)
         self.assertEqual(js.count("name: 'cuda_graph_max_bs'"), 1)
+
+    def test_docker_run_tab_is_first_and_has_independent_form(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
+
+        self.assertLess(html.index('data-profile-button="docker_run"'), html.index('data-profile-button="prefill"'))
+        self.assertLess(html.index('data-profile-button="prefill"'), html.index('data-profile-button="decode"'))
+        self.assertLess(html.index('data-profile-button="decode"'), html.index('data-profile-button="router"'))
+        self.assertIn('id="docker-run-command-form"', html)
+        self.assertIn('data-profile-panel="docker_run"', html)
+        self.assertIn('data-profile-fields="docker_run:container"', html)
+        self.assertIn('data-profile-fields="docker_run:extra"', html)
+        self.assertIn('name="rm"', html)
+        for field_name in ("image", "container_name", "shm_size", "volume", "env", "docker_arg"):
+            with self.subTest(field_name=field_name):
+                self.assertIn(f"name: '{field_name}'", js)
+        self.assertIn("usesSharedModel: false", js)
+        self.assertIn("sharedModelForm.hidden = !activeUsesSharedModel();", js)
+        self.assertIn("const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];", js)
+        self.assertIn("switchProfile('docker_run', { refresh: false });", js)
+        self.assertIn(".docker-run-grid", css)
+
+    def test_docker_run_ui_does_not_expose_fixed_default_docker_args(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        for fixed_arg in (
+            "--user=0",
+            "--privileged",
+            "--ipc=host",
+            "--network host",
+            "--runtime=nvidia",
+            "--gpus all",
+            "--ulimit memlock=-1:-1",
+            "/sys/fs/cgroup:/sys/fs/cgroup:ro",
+            "NVIDIA_VISIBLE_DEVICES=all",
+            "--entrypoint /bin/bash",
+        ):
+            with self.subTest(fixed_arg=fixed_arg):
+                self.assertNotIn(fixed_arg, html)
+                self.assertNotIn(fixed_arg, js)
 
 
 class ReadmeDocumentationTests(unittest.TestCase):

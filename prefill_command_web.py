@@ -12,8 +12,16 @@ import shlex
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
+
+from run_sglang_container import (
+    DEFAULT_CONTAINER_NAME,
+    DEFAULT_IMAGE,
+    DEFAULT_SHM_SIZE,
+    build_docker_command,
+)
 
 DEFAULT_WEB_PORT = 6060
 WEB_DIR = Path(__file__).with_name("web")
@@ -26,7 +34,8 @@ UNKNOWN_PARSER = "unknown"
 PREFILL_PROFILE = "prefill"
 DECODE_PROFILE = "decode"
 ROUTER_PROFILE = "router"
-SUPPORTED_PROFILES = {PREFILL_PROFILE, DECODE_PROFILE, ROUTER_PROFILE}
+DOCKER_RUN_PROFILE = "docker_run"
+SUPPORTED_PROFILES = {PREFILL_PROFILE, DECODE_PROFILE, ROUTER_PROFILE, DOCKER_RUN_PROFILE}
 
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
@@ -89,10 +98,21 @@ ROUTER_DEFAULTS: dict[str, Any] = {
     "extra_router_args": "",
 }
 
+DOCKER_RUN_DEFAULTS: dict[str, Any] = {
+    "image": DEFAULT_IMAGE,
+    "container_name": DEFAULT_CONTAINER_NAME,
+    "shm_size": DEFAULT_SHM_SIZE,
+    "rm": True,
+    "volume": "",
+    "env": "",
+    "docker_arg": "",
+}
+
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
     PREFILL_PROFILE: DEFAULTS,
     DECODE_PROFILE: DECODE_DEFAULTS,
     ROUTER_PROFILE: ROUTER_DEFAULTS,
+    DOCKER_RUN_PROFILE: DOCKER_RUN_DEFAULTS,
 }
 
 NCCL_ENV_DEFAULTS = {
@@ -336,6 +356,8 @@ def get_effective_defaults(profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     defaults = dict(base_defaults)
     if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE}:
         defaults.update(NCCL_ENV_DEFAULTS)
+    if normalized_profile == DOCKER_RUN_PROFILE:
+        return defaults
     defaults.update(infer_model_parsers(defaults["model_path"]))
     if normalized_profile == ROUTER_PROFILE:
         defaults["tool_call_parser"] = base_defaults["tool_call_parser"]
@@ -343,11 +365,31 @@ def get_effective_defaults(profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     return defaults
 
 
+def _parse_lines(value: Any) -> list[str]:
+    if not _has_value(value):
+        return []
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return [item.strip() for item in value if item.strip()]
+    if not isinstance(value, str):
+        raise ValueError("multi-line Docker fields must be strings or lists of strings")
+    return [line.strip() for line in value.splitlines() if line.strip()]
+
+
 def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     """Apply profile defaults when fields are omitted, blank, or null."""
     normalized_profile = normalize_profile(profile)
     defaults = get_profile_defaults(normalized_profile)
     raw = {} if payload is None else dict(payload)
+    if normalized_profile == DOCKER_RUN_PROFILE:
+        config = {
+            key: (raw[key] if _has_value(raw.get(key)) else value)
+            for key, value in defaults.items()
+        }
+        config["rm"] = _to_bool(raw.get("rm"), defaults["rm"])
+        config["volume"] = _parse_lines(config.get("volume"))
+        config["env"] = _parse_lines(config.get("env"))
+        config["docker_arg"] = _parse_lines(config.get("docker_arg"))
+        return config
     fixed_keys = set(FIXED_FORM_DEFAULT_KEYS)
     config = {
         key: (raw[key] if key not in fixed_keys and _has_value(raw.get(key)) else value)
@@ -479,8 +521,24 @@ def build_router_command(config: Mapping[str, Any]) -> list[str]:
     return cmd
 
 
+def build_docker_run_command_from_config(config: Mapping[str, Any]) -> list[str]:
+    """Build a docker run command list only; this module never executes it."""
+    args = SimpleNamespace(
+        image=config["image"],
+        container_name=config["container_name"],
+        shm_size=config["shm_size"],
+        rm=config["rm"],
+        volume=list(config.get("volume", [])),
+        env=list(config.get("env", [])),
+        docker_arg=list(config.get("docker_arg", [])),
+    )
+    return build_docker_command(args)
+
+
 def build_profile_command(profile: str, config: Mapping[str, Any]) -> list[str]:
     normalized_profile = normalize_profile(profile)
+    if normalized_profile == DOCKER_RUN_PROFILE:
+        return build_docker_run_command_from_config(config)
     if normalized_profile == ROUTER_PROFILE:
         return build_router_command(config)
     if normalized_profile == DECODE_PROFILE:

@@ -51,7 +51,7 @@ textarea {
 
 .profile-switcher {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
   margin-bottom: 18px;
 }
@@ -336,6 +336,22 @@ h3 {
   padding: 7px 9px;
   border-radius: 10px;
   font-size: 0.82rem;
+}
+
+.docker-run-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.docker-run-grid .field.wide {
+  grid-column: 1 / -1;
+}
+
+.docker-run-grid textarea {
+  min-height: 112px;
+}
+
+.docker-run-toggle-row {
+  margin: 12px 0 0;
 }
 
 .mtp-field-grid {

@@ -27,13 +27,36 @@
     </form>
 
     <nav class="profile-switcher" aria-label="Command profile">
-      <button class="profile-button active" type="button" data-profile-button="prefill">Prefill</button>
+      <button class="profile-button active" type="button" data-profile-button="docker_run">Docker Run</button>
+      <button class="profile-button" type="button" data-profile-button="prefill">Prefill</button>
       <button class="profile-button" type="button" data-profile-button="decode">Decode</button>
       <button class="profile-button" type="button" data-profile-button="router">Router</button>
     </nav>
 
     <main class="layout">
-      <section class="profile-panel" data-profile-panel="prefill">
+      <section class="profile-panel" data-profile-panel="docker_run">
+        <form id="docker-run-command-form" class="panel form-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Configuration</p>
+              <h2>Docker Run parameters</h2>
+            </div>
+          </div>
+          <section class="field-group docker-run-group" aria-labelledby="docker-run-container-heading">
+            <h3 id="docker-run-container-heading">Container</h3>
+            <div class="field-grid docker-run-grid" data-profile-fields="docker_run:container"></div>
+            <div class="toggle-row docker-run-toggle-row">
+              <label class="toggle"><input type="checkbox" name="rm"> <span>--rm</span></label>
+            </div>
+          </section>
+          <section class="field-group docker-run-group" aria-labelledby="docker-run-extra-heading">
+            <h3 id="docker-run-extra-heading">Volumes, environment, and Docker args</h3>
+            <div class="field-grid docker-run-grid" data-profile-fields="docker_run:extra"></div>
+          </section>
+        </form>
+      </section>
+
+      <section class="profile-panel" data-profile-panel="prefill" hidden>
         <form id="prefill-command-form" class="panel form-panel">
           <div class="panel-heading">
             <div>
