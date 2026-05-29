@@ -9,7 +9,7 @@ const profileConfigs = {
   docker_run: {
     title: 'Docker Run parameters',
     formId: 'docker-run-command-form',
-    usesSharedModel: false,
+    usesSharedModel: true,
     groups: {
       container: [
         { name: 'image', label: 'Image', wide: true },
@@ -17,9 +17,8 @@ const profileConfigs = {
         { name: 'shm_size', label: 'Shm size' },
       ],
       extra: [
-        { name: 'volume', label: 'Volumes (one per line)', type: 'textarea', wide: true },
-        { name: 'env', label: 'Environment variables (one per line)', type: 'textarea', wide: true },
-        { name: 'docker_arg', label: 'Extra Docker args (one per line)', type: 'textarea', wide: true },
+        { name: 'volume', label: 'Volumes', type: 'list', placeholder: '/data/cache', samePathMapping: true, wide: true },
+        { name: 'env', label: 'Environment variables', type: 'list', placeholder: 'HF_HOME=/data/cache', wide: true },
       ],
     },
   },
@@ -122,7 +121,47 @@ function activeDefaults() {
   return state.defaultsByProfile[state.activeProfile] || {};
 }
 
-function createField({ name, label, type = 'text', wide = false }, profile) {
+function createListField({ name, label, placeholder = '', samePathMapping = false, wide = false }) {
+  const wrapper = document.createElement('div');
+  wrapper.className = wide ? 'field list-field wide' : 'field list-field';
+  wrapper.dataset.listField = name;
+
+  const labelText = document.createElement('span');
+  labelText.textContent = label;
+
+  const inputRow = document.createElement('div');
+  inputRow.className = 'list-input-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.placeholder = placeholder;
+  input.dataset.listInput = name;
+  if (samePathMapping) input.dataset.samePathMapping = 'true';
+  const addButton = document.createElement('button');
+  addButton.type = 'button';
+  addButton.className = 'secondary-button add-list-item-button';
+  addButton.dataset.addListItem = name;
+  addButton.textContent = '添加';
+  inputRow.append(input, addButton);
+
+  const list = document.createElement('div');
+  list.className = 'list-items';
+  list.dataset.listItems = name;
+  const hiddenInput = document.createElement('input');
+  hiddenInput.type = 'hidden';
+  hiddenInput.name = name;
+  hiddenInput.dataset.listValue = name;
+
+  const hint = document.createElement('span');
+  hint.className = 'hint';
+  hint.dataset.hintFor = name;
+  wrapper.append(labelText, inputRow, list, hiddenInput, hint);
+  return wrapper;
+}
+
+function createField({ name, label, type = 'text', wide = false, ...options }, profile) {
+  if (type === 'list') return createListField({ name, label, wide, ...options });
+
   const wrapper = document.createElement('label');
   wrapper.className = wide ? 'field wide' : 'field';
   wrapper.textContent = label;
@@ -300,13 +339,59 @@ function applyModelDefaults(profile = state.activeProfile) {
   }
 }
 
+function setListFieldItems(field, values) {
+  const wrapper = document.querySelector(`[data-list-field="${field}"]`);
+  const list = wrapper?.querySelector(`[data-list-items="${field}"]`);
+  const hiddenInput = wrapper?.querySelector(`[data-list-value="${field}"]`);
+  if (!list || !hiddenInput) return;
+  const normalizedValues = values.map((value) => String(value || '').trim()).filter(Boolean);
+  list.replaceChildren(...normalizedValues.map((value) => {
+    const item = document.createElement('div');
+    item.className = 'list-item';
+    const text = document.createElement('span');
+    text.textContent = value;
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'delete-list-item-button';
+    deleteButton.dataset.deleteListItem = field;
+    deleteButton.dataset.value = value;
+    deleteButton.textContent = '删除';
+    item.append(text, deleteButton);
+    return item;
+  }));
+  hiddenInput.value = normalizedValues.join('\n');
+}
+
+function getListFieldItems(field) {
+  const hiddenInput = document.querySelector(`[data-list-value="${field}"]`);
+  return (hiddenInput?.value || '').split('\n').map((value) => value.trim()).filter(Boolean);
+}
+
+function addListFieldItem(field) {
+  const input = document.querySelector(`[data-list-input="${field}"]`);
+  const rawValue = input?.value?.trim();
+  if (!rawValue) return;
+  const value = input.dataset.samePathMapping === 'true' ? `${rawValue}:${rawValue}` : rawValue;
+  const values = getListFieldItems(field);
+  if (!values.includes(value)) values.push(value);
+  setListFieldItems(field, values);
+  input.value = '';
+  scheduleRefresh();
+}
+
+function deleteListFieldItem(field, value) {
+  setListFieldItems(field, getListFieldItems(field).filter((item) => item !== value));
+  scheduleRefresh();
+}
+
 function applyDefaults(profile = state.activeProfile) {
   const form = forms[profile];
   const defaults = state.defaultsByProfile[profile] || {};
   for (const element of form.elements) {
     if (!element.name) continue;
     const value = defaults[element.name];
-    if (element.type === 'checkbox') element.checked = Boolean(value);
+    if (element.dataset.listValue) setListFieldItems(element.name, String(value ?? '').split('\n'));
+    else if (element.type === 'checkbox') element.checked = Boolean(value);
     else if (element.type === 'radio') element.checked = element.value === String(value ?? '');
     else {
       element.value = value ?? '';
@@ -329,6 +414,16 @@ function activeUsesSharedModel() {
   return profileConfigs[state.activeProfile]?.usesSharedModel !== false;
 }
 
+function appendDockerRunModelVolume(payload) {
+  if (payload.profile !== 'docker_run') return;
+  const modelPath = String(payload.model_path || '').trim();
+  if (!modelPath) return;
+  const modelVolume = `${modelPath}:${modelPath}`;
+  const volumes = String(payload.volume || '').split('\n').map((value) => value.trim()).filter(Boolean);
+  if (!volumes.includes(modelVolume)) volumes.push(modelVolume);
+  payload.volume = volumes.join('\n');
+}
+
 function collectPayload() {
   const payload = { profile: state.activeProfile };
   const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];
@@ -339,6 +434,7 @@ function collectPayload() {
       payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
     }
   }
+  appendDockerRunModelVolume(payload);
   return payload;
 }
 
@@ -446,6 +542,16 @@ document.addEventListener('click', (event) => {
     const modelPathInput = sharedModelForm.querySelector('input[name="model_path"]');
     syncModelDerivedDefaults(modelPathInput?.value || '', state.activeProfile);
     refreshCommand();
+    return;
+  }
+  const addListButton = event.target.closest('[data-add-list-item]');
+  if (addListButton) {
+    addListFieldItem(addListButton.dataset.addListItem);
+    return;
+  }
+  const deleteListButton = event.target.closest('[data-delete-list-item]');
+  if (deleteListButton) {
+    deleteListFieldItem(deleteListButton.dataset.deleteListItem, deleteListButton.dataset.value);
     return;
   }
   const copyButton = event.target.closest('[data-copy-target]');

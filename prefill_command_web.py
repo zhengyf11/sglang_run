@@ -99,13 +99,13 @@ ROUTER_DEFAULTS: dict[str, Any] = {
 }
 
 DOCKER_RUN_DEFAULTS: dict[str, Any] = {
+    "model_path": DEFAULTS["model_path"],
     "image": DEFAULT_IMAGE,
     "container_name": DEFAULT_CONTAINER_NAME,
     "shm_size": DEFAULT_SHM_SIZE,
     "rm": True,
     "volume": "",
     "env": "",
-    "docker_arg": "",
 }
 
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -375,6 +375,19 @@ def _parse_lines(value: Any) -> list[str]:
     return [line.strip() for line in value.splitlines() if line.strip()]
 
 
+def _docker_model_volume(model_path: Any) -> str | None:
+    if not _has_value(model_path):
+        return None
+    path = str(model_path).strip()
+    return f"{path}:{path}" if path else None
+
+
+def _append_unique(items: list[str], item: str | None) -> list[str]:
+    if item and item not in items:
+        items.append(item)
+    return items
+
+
 def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     """Apply profile defaults when fields are omitted, blank, or null."""
     normalized_profile = normalize_profile(profile)
@@ -386,9 +399,8 @@ def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PRE
             for key, value in defaults.items()
         }
         config["rm"] = _to_bool(raw.get("rm"), defaults["rm"])
-        config["volume"] = _parse_lines(config.get("volume"))
+        config["volume"] = _append_unique(_parse_lines(config.get("volume")), _docker_model_volume(config.get("model_path")))
         config["env"] = _parse_lines(config.get("env"))
-        config["docker_arg"] = _parse_lines(config.get("docker_arg"))
         return config
     fixed_keys = set(FIXED_FORM_DEFAULT_KEYS)
     config = {
@@ -530,7 +542,7 @@ def build_docker_run_command_from_config(config: Mapping[str, Any]) -> list[str]
         rm=config["rm"],
         volume=list(config.get("volume", [])),
         env=list(config.get("env", [])),
-        docker_arg=list(config.get("docker_arg", [])),
+        docker_arg=[],
     )
     return build_docker_command(args)
 
@@ -555,7 +567,10 @@ def build_shell_command(command: Sequence[str]) -> str:
     index = 3
     while index < len(command):
         current = command[index]
-        if current.startswith("--") and index + 1 < len(command) and not command[index + 1].startswith("--"):
+        if current in {"-v", "-e"} and index + 1 < len(command):
+            argument_groups.append(command[index:index + 2])
+            index += 2
+        elif current.startswith("--") and index + 1 < len(command) and not command[index + 1].startswith("--"):
             argument_groups.append(command[index:index + 2])
             index += 2
         else:
