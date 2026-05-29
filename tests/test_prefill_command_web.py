@@ -41,7 +41,8 @@ class CommandGenerationTests(unittest.TestCase):
         )
         self.assertIn("--trust-remote-code", cmd)
         self.assertIn("--disable-cuda-graph", cmd)
-        self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "128")
+        self.assertNotIn("--max-running-requests", cmd)
+        self.assertNotIn("--cuda-graph-max-bs", cmd)
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "8192")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "65536")
         self.assertFalse(response["executed"])
@@ -113,7 +114,6 @@ class CommandGenerationTests(unittest.TestCase):
                 "disaggregation_transfer_backend": "custom-backend",
                 "disaggregation_ib_device": "mlx5_0",
                 "mem_fraction_static": 0.55,
-                "max_running_requests": 64,
                 "chunked_prefill_size": 4096,
                 "max_prefill_tokens": 32768,
             }
@@ -132,7 +132,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--disaggregation-transfer-backend") + 1], "custom-backend")
         self.assertEqual(cmd[cmd.index("--disaggregation-ib-device") + 1], "mlx5_0")
         self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.55")
-        self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "64")
+        self.assertNotIn("--max-running-requests", cmd)
+        self.assertNotIn("--cuda-graph-max-bs", cmd)
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "4096")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "32768")
 
@@ -412,12 +413,26 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--port") + 1], "30001")
         self.assertEqual(cmd[cmd.index("--disaggregation-mode") + 1], "decode")
         self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.7")
+        self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "128")
+        self.assertEqual(cmd[cmd.index("--cuda-graph-max-bs") + 1], "128")
         self.assertIn("--speculative-algorithm", cmd)
         self.assertIn("--trust-remote-code", cmd)
         self.assertNotIn("--disable-cuda-graph", cmd)
         self.assertIn("ulimit -l unlimited", response["combined_shell"])
         self.assertIn("unset http_proxy", response["combined_shell"])
         self.assertIn("export NCCL_IB_GID_INDEX=3", response["combined_shell"])
+
+    def test_decode_profile_allows_limit_overrides(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {"max_running_requests": 64, "cuda_graph_max_bs": 256},
+            profile="decode",
+        )
+        cmd = response["command"]
+
+        self.assertEqual(response["config"]["max_running_requests"], 64)
+        self.assertEqual(response["config"]["cuda_graph_max_bs"], 256)
+        self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "64")
+        self.assertEqual(cmd[cmd.index("--cuda-graph-max-bs") + 1], "256")
 
     def test_decode_disaggregation_mode_is_fixed(self) -> None:
         response = prefill_command_web.build_command_response({"disaggregation_mode": "prefill"}, profile="decode")
@@ -440,6 +455,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--retry-max-retries") + 1], "3")
         self.assertIn("unset http_proxy", response["combined_shell"])
         self.assertNotIn("NCCL_IB_GID_INDEX", response["combined_shell"])
+        self.assertNotIn("--max-running-requests", cmd)
+        self.assertNotIn("--cuda-graph-max-bs", cmd)
 
     def test_router_profile_allows_endpoint_overrides(self) -> None:
         response = prefill_command_web.build_command_response(
@@ -747,6 +764,24 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("applyModelDefaults(profile);", js)
         self.assertIn(".profile-switcher", css)
         self.assertIn(".profile-button.active", css)
+
+    def test_decode_limits_section_is_decode_only(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+
+        def form_fragment(profile: str) -> str:
+            form_start = html.index(f'id="{profile}-command-form"')
+            form_end = html.index("</form>", form_start)
+            return html[form_start:form_end]
+
+        self.assertIn('id="decode-limits-heading">Limits</h3>', html)
+        self.assertIn('data-profile-fields="decode:limits"', form_fragment("decode"))
+        self.assertNotIn('data-profile-fields="prefill:limits"', form_fragment("decode"))
+        self.assertNotIn('data-profile-fields="decode:limits"', form_fragment("prefill"))
+        self.assertNotIn('data-profile-fields="decode:limits"', form_fragment("router"))
+        self.assertIn("limits: [\n        { name: 'max_running_requests', label: 'Max running requests', type: 'number' },\n        { name: 'cuda_graph_max_bs', label: 'Cuda graph max bs', type: 'number' },\n      ],", js)
+        self.assertEqual(js.count("name: 'max_running_requests'"), 1)
+        self.assertEqual(js.count("name: 'cuda_graph_max_bs'"), 1)
 
 
 class ReadmeDocumentationTests(unittest.TestCase):
