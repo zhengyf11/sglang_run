@@ -67,7 +67,19 @@ function createField({ name, label, type = 'text', wide = false }) {
   hint.className = 'hint';
   hint.dataset.hintFor = name;
 
-  wrapper.append(input, hint);
+  if (name === 'model_path') {
+    const inputRow = document.createElement('div');
+    inputRow.className = 'model-path-row';
+    const identifyButton = document.createElement('button');
+    identifyButton.className = 'secondary-button identify-model-button';
+    identifyButton.type = 'button';
+    identifyButton.id = 'identify-model-button';
+    identifyButton.textContent = '识别模型';
+    inputRow.append(input, identifyButton);
+    wrapper.append(inputRow, hint);
+  } else {
+    wrapper.append(input, hint);
+  }
   return wrapper;
 }
 
@@ -205,6 +217,8 @@ function applyDefaults() {
     }
   }
 
+  syncModelDerivedDefaults(form.querySelector('input[name="model_path"]')?.value || state.defaults.model_path || '');
+
   for (const hint of document.querySelectorAll('[data-hint-for]')) {
     const value = state.defaults[hint.dataset.hintFor];
     hint.textContent = value === undefined ? '' : `Default: ${value}`;
@@ -282,6 +296,12 @@ async function copyOutput(targetId, button) {
 }
 
 renderFields();
+const identifyModelButton = document.querySelector('#identify-model-button');
+identifyModelButton?.addEventListener('click', () => {
+  const modelPathInput = form.querySelector('input[name="model_path"]');
+  syncModelDerivedDefaults(modelPathInput?.value || '');
+  refreshCommand();
+});
 form.addEventListener('input', (event) => {
   if (event.target === enableMtpInput) updateMtpVisibility();
   if (attentionModeInputs.includes(event.target)) {
