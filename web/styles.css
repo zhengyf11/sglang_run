@@ -346,8 +346,48 @@ h3 {
   grid-column: 1 / -1;
 }
 
-.docker-run-grid textarea {
-  min-height: 112px;
+.list-field {
+  align-content: start;
+}
+
+.list-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.add-list-item-button {
+  white-space: nowrap;
+}
+
+.list-items {
+  display: grid;
+  gap: 8px;
+}
+
+.list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #f8fafc;
+  color: #334155;
+  overflow-wrap: anywhere;
+}
+
+.delete-list-item-button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: var(--danger);
+  cursor: pointer;
+  font-weight: 800;
+  padding: 6px 10px;
 }
 
 .docker-run-toggle-row {

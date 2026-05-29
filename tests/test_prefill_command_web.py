@@ -503,13 +503,19 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--ulimit") + 1], "memlock=-1:-1")
         self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
         self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
+        self.assertIn("/mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8", cmd)
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertEqual(cmd[-3:], ["lmsysorg/sglang:latest", "-lc", "tail -f /dev/null"])
+        self.assertIn("-v /sys/fs/cgroup:/sys/fs/cgroup:ro \\", response["shell_command"])
+        self.assertIn("-v /mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8 \\", response["shell_command"])
+        self.assertIn("-e NVIDIA_VISIBLE_DEVICES=all \\", response["shell_command"])
+        self.assertNotIn("-v \\\n", response["shell_command"])
+        self.assertNotIn("-e \\\n", response["shell_command"])
         self.assertFalse(response["executed"])
         self.assertEqual(response["resource_limits"], [])
         self.assertEqual(response["env_exports"], [])
 
-    def test_docker_run_profile_supports_dynamic_fields(self) -> None:
+    def test_docker_run_profile_supports_dynamic_fields_and_ignores_web_docker_arg(self) -> None:
         response = prefill_command_web.build_command_response(
             {
                 "image": "custom/sglang:test",
@@ -519,7 +525,7 @@ class CommandGenerationTests(unittest.TestCase):
                 "volume": "/data/models:/models:ro\n/data/cache:/cache\n",
                 "env": "HF_HOME=/cache\nTOKEN=value with spaces",
                 "docker_arg": "--cap-add=SYS_ADMIN\n--security-opt=seccomp=unconfined",
-                "model_path": "/should/not/be/used",
+                "model_path": "/models/custom",
             },
             profile="docker_run",
         )
@@ -530,12 +536,13 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "16g")
         self.assertIn("/data/models:/models:ro", cmd)
         self.assertIn("/data/cache:/cache", cmd)
+        self.assertIn("/models/custom:/models/custom", cmd)
         self.assertIn("HF_HOME=/cache", cmd)
         self.assertIn("TOKEN=value with spaces", cmd)
-        self.assertIn("--cap-add=SYS_ADMIN", cmd)
-        self.assertIn("--security-opt=seccomp=unconfined", cmd)
+        self.assertNotIn("--cap-add=SYS_ADMIN", cmd)
+        self.assertNotIn("--security-opt=seccomp=unconfined", cmd)
+        self.assertNotIn("docker_arg", response["config"])
         self.assertEqual(cmd[-3:], ["custom/sglang:test", "-lc", "tail -f /dev/null"])
-        self.assertNotIn("/should/not/be/used", cmd)
 
 
 class HandlerTests(unittest.TestCase):
@@ -644,6 +651,9 @@ class HandlerTests(unittest.TestCase):
 
                 self.assertEqual(body["profile"], profile)
                 self.assertEqual(body["defaults"][key], expected_value)
+                if profile == "docker_run":
+                    self.assertEqual(body["defaults"]["model_path"], "/mnt/GLM-5.1-FP8")
+                    self.assertNotIn("docker_arg", body["defaults"])
 
     def test_get_defaults_rejects_unknown_profile(self) -> None:
         handler = self._make_handler("GET", "/api/defaults?profile=bad")
@@ -696,6 +706,7 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["profile"], "docker_run")
         self.assertIn("docker run", body["shell_command"])
         self.assertIn("custom/sglang:test", body["shell_command"])
+        self.assertIn("-v /mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8", body["shell_command"])
         self.assertFalse(body["executed"])
 
     def test_invalid_json_returns_400(self) -> None:
@@ -903,14 +914,28 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('data-profile-fields="docker_run:container"', html)
         self.assertIn('data-profile-fields="docker_run:extra"', html)
         self.assertIn('name="rm"', html)
-        for field_name in ("image", "container_name", "shm_size", "volume", "env", "docker_arg"):
+        for field_name in ("image", "container_name", "shm_size", "volume", "env"):
             with self.subTest(field_name=field_name):
                 self.assertIn(f"name: '{field_name}'", js)
-        self.assertIn("usesSharedModel: false", js)
+        self.assertNotIn("name: 'docker_arg'", js)
+        self.assertNotIn("Extra Docker args", html)
+        self.assertNotIn("Extra Docker args", js)
+        self.assertNotIn("usesSharedModel: false", js)
+        self.assertIn("usesSharedModel: true", js)
         self.assertIn("sharedModelForm.hidden = !activeUsesSharedModel();", js)
         self.assertIn("const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];", js)
+        self.assertIn("appendDockerRunModelVolume(payload);", js)
+        self.assertIn("const modelVolume = `${modelPath}:${modelPath}`;", js)
         self.assertIn("switchProfile('docker_run', { refresh: false });", js)
+        self.assertIn("data-add-list-item", js)
+        self.assertIn("data-delete-list-item", js)
+        self.assertIn("addButton.textContent = '添加';", js)
+        self.assertIn("deleteButton.textContent = '删除';", js)
+        self.assertIn("input.dataset.samePathMapping = 'true';", js)
+        self.assertIn("const value = input.dataset.samePathMapping === 'true' ? `${rawValue}:${rawValue}` : rawValue;", js)
         self.assertIn(".docker-run-grid", css)
+        self.assertIn(".list-input-row", css)
+        self.assertIn(".delete-list-item-button", css)
 
     def test_docker_run_ui_does_not_expose_fixed_default_docker_args(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
