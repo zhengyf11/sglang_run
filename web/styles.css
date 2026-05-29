@@ -45,6 +45,10 @@ textarea {
   padding: 20px 0;
 }
 
+.model-panel {
+  margin-bottom: 14px;
+}
+
 .profile-switcher {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -199,6 +203,15 @@ h3 {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.shared-model-grid {
+  margin-top: 16px;
+  grid-template-columns: minmax(280px, 1.5fr) repeat(3, minmax(180px, 1fr));
+}
+
+.shared-model-grid .field.wide {
+  grid-column: auto;
 }
 
 .field {
@@ -486,7 +499,8 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .field-grid:not(.mtp-field-grid) {
+  .field-grid:not(.mtp-field-grid),
+  .shared-model-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -526,6 +540,7 @@ textarea {
   }
 
   .field-grid,
+  .shared-model-grid,
   .mtp-field-grid,
   .radio-grid,
   .context-backend-options,

@@ -9,6 +9,23 @@
 </head>
 <body>
   <div class="shell">
+    <form id="shared-model-form" class="panel form-panel model-panel">
+      <div class="panel-heading">
+        <div>
+          <p class="eyebrow">Configuration</p>
+          <h2>Model</h2>
+        </div>
+        <div class="panel-actions">
+          <div class="status-card" aria-live="polite">
+            <span class="status-dot" id="status-dot"></span>
+            <span id="status-text">Loading defaults…</span>
+          </div>
+          <button class="secondary-button" type="button" id="reset-button">Reset defaults</button>
+        </div>
+      </div>
+      <div class="field-grid shared-model-grid" data-model-fields></div>
+    </form>
+
     <nav class="profile-switcher" aria-label="Command profile">
       <button class="profile-button active" type="button" data-profile-button="prefill">Prefill</button>
       <button class="profile-button" type="button" data-profile-button="decode">Decode</button>
@@ -23,19 +40,7 @@
               <p class="eyebrow">Configuration</p>
               <h2>Prefill parameters</h2>
             </div>
-            <div class="panel-actions">
-              <div class="status-card" aria-live="polite">
-                <span class="status-dot" id="status-dot"></span>
-                <span id="status-text">Loading defaults…</span>
-              </div>
-              <button class="secondary-button" type="button" id="reset-button">Reset defaults</button>
-            </div>
           </div>
-
-          <section class="field-group" aria-labelledby="prefill-model-heading">
-            <h3 id="prefill-model-heading">Model</h3>
-            <div class="field-grid" data-profile-fields="prefill:model"></div>
-          </section>
 
           <section class="field-group" aria-labelledby="prefill-parallel-heading">
             <h3 id="prefill-parallel-heading">Parallel</h3>
@@ -122,10 +127,6 @@
       <section class="profile-panel" data-profile-panel="decode" hidden>
         <form id="decode-command-form" class="panel form-panel">
           <div class="panel-heading"><div><p class="eyebrow">Configuration</p><h2>Decode parameters</h2></div></div>
-          <section class="field-group" aria-labelledby="decode-model-heading">
-            <h3 id="decode-model-heading">Model</h3>
-            <div class="field-grid" data-profile-fields="decode:model"></div>
-          </section>
           <section class="field-group" aria-labelledby="decode-parallel-heading">
             <h3 id="decode-parallel-heading">Parallel</h3>
             <div class="parallel-grid">
@@ -179,10 +180,6 @@
       <section class="profile-panel" data-profile-panel="router" hidden>
         <form id="router-command-form" class="panel form-panel">
           <div class="panel-heading"><div><p class="eyebrow">Configuration</p><h2>Router parameters</h2></div></div>
-          <section class="field-group" aria-labelledby="router-model-heading">
-            <h3 id="router-model-heading">Model</h3>
-            <div class="field-grid" data-profile-fields="router:model"></div>
-          </section>
           <section class="field-group" aria-labelledby="router-endpoints-heading">
             <h3 id="router-endpoints-heading">P/D endpoints</h3>
             <div class="field-grid" data-profile-fields="router:endpoints"></div>
