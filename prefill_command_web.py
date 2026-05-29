@@ -385,6 +385,7 @@ def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PRE
             config[bool_key] = _to_bool(raw.get(bool_key), defaults[bool_key])
 
     if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE}:
+        config["trust_remote_code"] = True
         for env_key, default in NCCL_ENV_DEFAULTS.items():
             config[env_key] = default if env_key in fixed_keys else raw[env_key] if _has_value(raw.get(env_key)) else default
     return config

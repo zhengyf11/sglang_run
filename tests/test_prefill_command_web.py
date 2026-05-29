@@ -366,12 +366,14 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--speculative-eagle-topk") + 1], "2")
         self.assertEqual(cmd[cmd.index("--speculative-num-draft-tokens") + 1], "8")
 
-    def test_boolean_options_control_flags(self) -> None:
-        cmd = prefill_command_web.build_command_response(
+    def test_prefill_trust_remote_code_is_fixed_when_payload_disables_it(self) -> None:
+        response = prefill_command_web.build_command_response(
             {"trust_remote_code": False, "disable_cuda_graph": False}
-        )["command"]
+        )
+        cmd = response["command"]
 
-        self.assertNotIn("--trust-remote-code", cmd)
+        self.assertTrue(response["config"]["trust_remote_code"])
+        self.assertIn("--trust-remote-code", cmd)
         self.assertNotIn("--disable-cuda-graph", cmd)
 
     def test_extra_sglang_args_are_appended(self) -> None:
@@ -422,6 +424,22 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertIn("unset http_proxy", response["combined_shell"])
         self.assertIn("export NCCL_IB_GID_INDEX=3", response["combined_shell"])
 
+    def test_decode_profile_trust_remote_code_is_fixed_when_payload_disables_it(self) -> None:
+        response = prefill_command_web.build_command_response({"trust_remote_code": False}, profile="decode")
+        cmd = response["command"]
+
+        self.assertTrue(response["config"]["trust_remote_code"])
+        self.assertIn("--trust-remote-code", cmd)
+
+    def test_decode_profile_disable_cuda_graph_is_opt_in(self) -> None:
+        default_response = prefill_command_web.build_command_response({}, profile="decode")
+        enabled_response = prefill_command_web.build_command_response({"disable_cuda_graph": True}, profile="decode")
+
+        self.assertFalse(default_response["config"]["disable_cuda_graph"])
+        self.assertNotIn("--disable-cuda-graph", default_response["command"])
+        self.assertTrue(enabled_response["config"]["disable_cuda_graph"])
+        self.assertIn("--disable-cuda-graph", enabled_response["command"])
+
     def test_decode_profile_allows_limit_overrides(self) -> None:
         response = prefill_command_web.build_command_response(
             {"max_running_requests": 64, "cuda_graph_max_bs": 256},
@@ -455,6 +473,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--retry-max-retries") + 1], "3")
         self.assertIn("unset http_proxy", response["combined_shell"])
         self.assertNotIn("NCCL_IB_GID_INDEX", response["combined_shell"])
+        self.assertNotIn("--trust-remote-code", cmd)
+        self.assertNotIn("--disable-cuda-graph", cmd)
         self.assertNotIn("--max-running-requests", cmd)
         self.assertNotIn("--cuda-graph-max-bs", cmd)
 
@@ -764,6 +784,22 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("applyModelDefaults(profile);", js)
         self.assertIn(".profile-switcher", css)
         self.assertIn(".profile-button.active", css)
+
+    def test_prefill_and_decode_hide_trust_remote_code_and_decode_shows_disable_cuda_graph(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+
+        def form_fragment(profile: str) -> str:
+            form_start = html.index(f'id="{profile}-command-form"')
+            form_end = html.index("</form>", form_start)
+            return html[form_start:form_end]
+
+        self.assertNotIn("Trust remote code", form_fragment("prefill"))
+        self.assertNotIn('name="trust_remote_code"', form_fragment("prefill"))
+        self.assertNotIn("Trust remote code", form_fragment("decode"))
+        self.assertNotIn('name="trust_remote_code"', form_fragment("decode"))
+        self.assertIn("Disable CUDA graph", form_fragment("prefill"))
+        self.assertIn("Disable CUDA graph", form_fragment("decode"))
+        self.assertIn('name="disable_cuda_graph"', form_fragment("decode"))
 
     def test_decode_limits_section_is_decode_only(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
