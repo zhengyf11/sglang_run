@@ -483,6 +483,7 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("200", status_line)
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertNotIn("Location", headers)
+        self.assertIn('<form id="shared-model-form"', html)
         self.assertIn('<form id="prefill-command-form"', html)
         self.assertIn('<form id="decode-command-form"', html)
         self.assertIn('<form id="router-command-form"', html)
@@ -683,11 +684,12 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertNotIn("{ name: 'disaggregation_mode', label: 'Mode' }", js)
         self.assertNotIn('name="disaggregation_mode"', html)
         self.assertIn("syncModelDerivedDefaults", js)
-        self.assertIn("syncModelDerivedDefaults(form.querySelector('input[name=\"model_path\"]')?.value || defaults.model_path || '', profile);", js)
+        self.assertIn("syncModelDerivedDefaults(sharedModelForm.querySelector('input[name=\"model_path\"]')?.value || defaults.model_path || '', profile);", js)
         self.assertIn("identifyButton.textContent = '识别模型';", js)
         self.assertIn("event.target.closest('[data-identify-model]')", js)
-        self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '', profile);", js)
-        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, profile);", js)
+        self.assertIn("const modelPathInput = sharedModelForm.querySelector('input[name=\"model_path\"]');", js)
+        self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '', state.activeProfile);", js)
+        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, state.activeProfile);", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
@@ -701,6 +703,23 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("pipelineOptions.hidden = !visible;", js)
         self.assertIn("element.disabled = !visible;", js)
 
+    def test_shared_model_panel_is_above_profile_switcher(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
+
+        self.assertIn('id="shared-model-form"', html)
+        self.assertIn('data-model-fields', html)
+        self.assertLess(html.index('id="shared-model-form"'), html.index('class="profile-switcher"'))
+        self.assertLess(html.index('class="profile-switcher"'), html.index('id="prefill-command-form"'))
+        self.assertIn("const sharedModelFields", js)
+        for field_name in ("model_path", "served_model_name", "tool_call_parser", "reasoning_parser"):
+            with self.subTest(field_name=field_name):
+                self.assertIn(f"name: '{field_name}'", js)
+        self.assertIn("sharedModelFieldsTarget?.replaceChildren(...sharedModelFields.map((field) => createField(field, 'shared')));", js)
+        self.assertIn(".model-panel", css)
+        self.assertIn(".shared-model-grid", css)
+
     def test_prefill_decode_router_are_independent_profile_forms(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
@@ -709,14 +728,23 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('id="prefill-command-form"', html)
         self.assertIn('id="decode-command-form"', html)
         self.assertIn('id="router-command-form"', html)
+        for profile in ("prefill", "decode", "router"):
+            with self.subTest(profile=profile):
+                form_start = html.index(f'id="{profile}-command-form"')
+                form_end = html.index("</form>", form_start)
+                form_html = html[form_start:form_end]
+                self.assertNotIn(f'data-profile-fields="{profile}:model"', form_html)
+                self.assertNotIn(f'{profile}-model-heading', form_html)
         self.assertIn('data-profile-button="prefill"', html)
         self.assertIn('data-profile-button="decode"', html)
         self.assertIn('data-profile-button="router"', html)
         self.assertIn("const profileConfigs", js)
         self.assertIn("const payload = { profile: state.activeProfile };", js)
-        self.assertIn("for (const element of activeForm().elements)", js)
+        self.assertIn("for (const form of [sharedModelForm, activeForm()])", js)
+        self.assertIn("for (const element of form.elements)", js)
         self.assertIn("switchProfile", js)
         self.assertIn("/api/defaults?profile=", js)
+        self.assertIn("applyModelDefaults(profile);", js)
         self.assertIn(".profile-switcher", css)
         self.assertIn(".profile-button.active", css)
 

@@ -1,14 +1,15 @@
+const sharedModelFields = [
+  { name: 'model_path', label: 'Model path', wide: true },
+  { name: 'served_model_name', label: 'Served model name' },
+  { name: 'tool_call_parser', label: 'Tool call parser' },
+  { name: 'reasoning_parser', label: 'Reasoning parser' },
+];
+
 const profileConfigs = {
   prefill: {
     title: 'Prefill parameters',
     formId: 'prefill-command-form',
     groups: {
-      model: [
-        { name: 'model_path', label: 'Model path', wide: true },
-        { name: 'served_model_name', label: 'Served model name' },
-        { name: 'tool_call_parser', label: 'Tool call parser' },
-        { name: 'reasoning_parser', label: 'Reasoning parser' },
-      ],
       runtime: [
         { name: 'mem_fraction_static', label: 'Mem fraction static' },
         { name: 'host', label: 'SGLang host' },
@@ -36,12 +37,6 @@ const profileConfigs = {
     title: 'Decode parameters',
     formId: 'decode-command-form',
     groups: {
-      model: [
-        { name: 'model_path', label: 'Model path', wide: true },
-        { name: 'served_model_name', label: 'Served model name' },
-        { name: 'tool_call_parser', label: 'Tool call parser' },
-        { name: 'reasoning_parser', label: 'Reasoning parser' },
-      ],
       runtime: [
         { name: 'mem_fraction_static', label: 'Mem fraction static' },
         { name: 'host', label: 'SGLang host' },
@@ -64,12 +59,6 @@ const profileConfigs = {
     title: 'Router parameters',
     formId: 'router-command-form',
     groups: {
-      model: [
-        { name: 'model_path', label: 'Model path', wide: true },
-        { name: 'served_model_name', label: 'Served model name' },
-        { name: 'tool_call_parser', label: 'Tool call parser' },
-        { name: 'reasoning_parser', label: 'Reasoning parser' },
-      ],
       endpoints: [
         { name: 'prefill', label: 'Prefill endpoint' },
         { name: 'decode', label: 'Decode endpoint' },
@@ -94,6 +83,8 @@ const state = {
   refreshTimer: null,
 };
 
+const sharedModelForm = document.querySelector('#shared-model-form');
+const sharedModelFieldsTarget = document.querySelector('[data-model-fields]');
 const forms = Object.fromEntries(profiles.map((profile) => [profile, document.querySelector(`#${profileConfigs[profile].formId}`)]));
 const panels = Object.fromEntries(profiles.map((profile) => [profile, document.querySelector(`[data-profile-panel="${profile}"]`)]));
 const profileButtons = Array.from(document.querySelectorAll('[data-profile-button]'));
@@ -142,6 +133,7 @@ function createField({ name, label, type = 'text', wide = false }, profile) {
 }
 
 function renderFields() {
+  sharedModelFieldsTarget?.replaceChildren(...sharedModelFields.map((field) => createField(field, 'shared')));
   for (const profile of profiles) {
     const config = profileConfigs[profile];
     for (const [group, fields] of Object.entries(config.groups)) {
@@ -250,13 +242,16 @@ function inferModelParsers(modelPath) {
 }
 
 function syncModelDerivedDefaults(modelPath, profile = state.activeProfile) {
-  const form = forms[profile];
-  const servedModelInput = form?.querySelector('input[name="served_model_name"]');
-  const toolParserInput = form?.querySelector('input[name="tool_call_parser"]');
-  const reasoningParserInput = form?.querySelector('input[name="reasoning_parser"]');
+  const servedModelInput = sharedModelForm?.querySelector('input[name="served_model_name"]');
+  const toolParserInput = sharedModelForm?.querySelector('input[name="tool_call_parser"]');
+  const reasoningParserInput = sharedModelForm?.querySelector('input[name="reasoning_parser"]');
+  const previousProfile = state.activeProfile;
+  state.activeProfile = profile;
   if (servedModelInput) servedModelInput.value = inferServedModelName(modelPath);
   const parsers = inferModelParsers(modelPath);
-  if (toolParserInput) toolParserInput.value = profile === 'router' ? (activeDefaults().tool_call_parser || parsers.tool_call_parser) : parsers.tool_call_parser;
+  const defaults = activeDefaults();
+  state.activeProfile = previousProfile;
+  if (toolParserInput) toolParserInput.value = profile === 'router' ? (defaults.tool_call_parser || parsers.tool_call_parser) : parsers.tool_call_parser;
   if (reasoningParserInput) reasoningParserInput.value = parsers.reasoning_parser;
 }
 
@@ -268,6 +263,21 @@ function setStatus(message, tone = 'loading') {
 function showError(message) {
   errorBox.hidden = !message;
   errorBox.textContent = message || '';
+}
+
+function applyModelDefaults(profile = state.activeProfile) {
+  const defaults = state.defaultsByProfile[profile] || {};
+  for (const element of sharedModelForm.elements) {
+    if (!element.name) continue;
+    const value = defaults[element.name];
+    element.value = value ?? '';
+    element.placeholder = value ?? '';
+  }
+  syncModelDerivedDefaults(sharedModelForm.querySelector('input[name="model_path"]')?.value || defaults.model_path || '', profile);
+  for (const hint of sharedModelForm.querySelectorAll('[data-hint-for]')) {
+    const value = defaults[hint.dataset.hintFor];
+    hint.textContent = value === undefined ? '' : `Default: ${value}`;
+  }
 }
 
 function applyDefaults(profile = state.activeProfile) {
@@ -284,11 +294,6 @@ function applyDefaults(profile = state.activeProfile) {
     }
   }
 
-  const previousProfile = state.activeProfile;
-  state.activeProfile = profile;
-  syncModelDerivedDefaults(form.querySelector('input[name="model_path"]')?.value || defaults.model_path || '', profile);
-  state.activeProfile = previousProfile;
-
   for (const hint of form.querySelectorAll('[data-hint-for]')) {
     const value = defaults[hint.dataset.hintFor];
     hint.textContent = value === undefined ? '' : `Default: ${value}`;
@@ -302,10 +307,12 @@ function applyDefaults(profile = state.activeProfile) {
 
 function collectPayload() {
   const payload = { profile: state.activeProfile };
-  for (const element of activeForm().elements) {
-    if (!element.name || element.disabled) continue;
-    if (element.type === 'radio' && !element.checked) continue;
-    payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
+  for (const form of [sharedModelForm, activeForm()]) {
+    for (const element of form.elements) {
+      if (!element.name || element.disabled) continue;
+      if (element.type === 'radio' && !element.checked) continue;
+      payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
+    }
   }
   return payload;
 }
@@ -341,6 +348,7 @@ async function loadDefaults(profile) {
   state.defaultsByProfile[profile] = body.defaults;
   state.parserMetadata = body.parser_metadata || state.parserMetadata || {};
   applyDefaults(profile);
+  if (profile === state.activeProfile) applyModelDefaults(profile);
 }
 
 async function loadAllDefaults() {
@@ -361,6 +369,7 @@ function switchProfile(profile, { refresh = true } = {}) {
     panels[current].hidden = current !== profile;
     profileButtons.find((button) => button.dataset.profileButton === current)?.classList.toggle('active', current === profile);
   }
+  applyModelDefaults(profile);
   if (refresh) refreshCommand();
 }
 
@@ -380,6 +389,11 @@ async function copyOutput(targetId, button) {
 }
 
 renderFields();
+sharedModelForm.addEventListener('input', (event) => {
+  if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, state.activeProfile);
+  scheduleRefresh();
+});
+
 for (const profile of profiles) {
   forms[profile].addEventListener('input', (event) => {
     if (event.target.name === 'enable_mtp') updateMtpVisibility(profile);
@@ -391,7 +405,6 @@ for (const profile of profiles) {
     }
     if (event.target === controls.worldSizeInput && controls.dpSizeInput?.disabled) controls.dpSizeInput.value = controls.worldSizeInput.value;
     if (controls.moeModeInputs.includes(event.target)) updateExpertOverlapVisibility(profile);
-    if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, profile);
     if (profile === state.activeProfile) scheduleRefresh();
   });
 }
@@ -404,10 +417,9 @@ document.addEventListener('click', (event) => {
   }
   const identifyButton = event.target.closest('[data-identify-model]');
   if (identifyButton) {
-    const profile = identifyButton.dataset.identifyModel;
-    const modelPathInput = forms[profile].querySelector('input[name="model_path"]');
-    syncModelDerivedDefaults(modelPathInput?.value || '', profile);
-    if (profile === state.activeProfile) refreshCommand();
+    const modelPathInput = sharedModelForm.querySelector('input[name="model_path"]');
+    syncModelDerivedDefaults(modelPathInput?.value || '', state.activeProfile);
+    refreshCommand();
     return;
   }
   const copyButton = event.target.closest('[data-copy-target]');
@@ -415,6 +427,7 @@ document.addEventListener('click', (event) => {
 });
 
 resetButton.addEventListener('click', () => {
+  applyModelDefaults(state.activeProfile);
   applyDefaults(state.activeProfile);
   refreshCommand();
 });
