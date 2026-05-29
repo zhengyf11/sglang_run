@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import mimetypes
+import re
 import shlex
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -15,6 +17,9 @@ from urllib.parse import urlparse
 
 DEFAULT_WEB_PORT = 6060
 WEB_DIR = Path(__file__).with_name("web")
+SGLANG_SOURCE_DIR = Path(r"D:\AI agent\code\sglang-main-20260519")
+TOOL_CALL_PARSER_SOURCE = SGLANG_SOURCE_DIR / "python" / "sglang" / "srt" / "function_call" / "function_call_parser.py"
+REASONING_PARSER_SOURCE = SGLANG_SOURCE_DIR / "python" / "sglang" / "srt" / "parser" / "reasoning_parser.py"
 
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
@@ -35,7 +40,7 @@ DEFAULTS: dict[str, Any] = {
     "speculative_num_steps": 3,
     "speculative_eagle_topk": 1,
     "speculative_num_draft_tokens": 4,
-    "mem_fraction_static": 0.7,
+    "mem_fraction_static": 0.9,
     "host": "0.0.0.0",
     "port": 30000,
     "nnodes": 1,
@@ -69,6 +74,7 @@ PROXY_ENV_VARS = (
 FIXED_FORM_DEFAULT_KEYS = {
     "nnodes",
     "node_rank",
+    "disaggregation_mode",
     "NCCL_IB_GID_INDEX",
     "NCCL_IB_TC",
     "NCCL_IB_TIMEOUT",
@@ -101,6 +107,51 @@ COMMAND_FIELDS: tuple[tuple[str, str], ...] = (
     ("max_prefill_tokens", "--max-prefill-tokens"),
 )
 
+PATH_SEGMENTS_TO_IGNORE = {
+    "mnt",
+    "mount",
+    "model",
+    "models",
+    "vllm",
+    "sglang",
+    "workspace",
+    "data",
+    "api",
+}
+
+TOOL_CALL_PARSER_FALLBACK_CHOICES = (
+    "deepseekv3", "deepseekv31", "deepseekv32", "deepseekv4", "glm", "glm45", "glm47",
+    "gpt-oss", "kimi_k2", "lfm2", "llama3", "mimo", "mistral", "poolside_v1", "pythonic",
+    "qwen", "qwen25", "qwen3_coder", "step3", "step3p5", "minimax-m2", "trinity",
+    "interns1", "hermes", "hunyuan", "gigachat3", "gemma4",
+)
+REASONING_PARSER_FALLBACK_CHOICES = (
+    "deepseek-r1", "deepseek-v3", "deepseek-v4", "glm45", "hunyuan", "gpt-oss", "kimi",
+    "kimi_k2", "mimo", "poolside_v1", "qwen3", "qwen3-thinking", "minimax",
+    "minimax-append-think", "step3", "step3p5", "mistral", "nemotron_3", "interns1", "gemma4",
+)
+
+PARSER_INFERENCE_RULES: tuple[dict[str, Any], ...] = (
+    {"patterns": ("qwen3-coder",), "tool_call_parser": "qwen3_coder", "reasoning_parser": "qwen3"},
+    {"patterns": ("qwen3", "qwen-3", "qwen_3"), "tool_call_parser": "qwen", "reasoning_parser": "qwen3"},
+    {"patterns": ("qwen2.5", "qwen25", "qwen-2.5"), "tool_call_parser": "qwen25", "reasoning_parser": "qwen3"},
+    {"patterns": ("qwen",), "tool_call_parser": "qwen", "reasoning_parser": "qwen3"},
+    {"patterns": ("deepseek-v3.2", "deepseekv3.2", "deepseek-v32", "deepseekv32"), "tool_call_parser": "deepseekv32", "reasoning_parser": "deepseek-v3"},
+    {"patterns": ("deepseek-v3.1", "deepseekv3.1", "deepseek-v31", "deepseekv31"), "tool_call_parser": "deepseekv31", "reasoning_parser": "deepseek-v3"},
+    {"patterns": ("deepseek-v4", "deepseekv4"), "tool_call_parser": "deepseekv4", "reasoning_parser": "deepseek-v4"},
+    {"patterns": ("deepseek-r1",), "tool_call_parser": "deepseekv3", "reasoning_parser": "deepseek-r1"},
+    {"patterns": ("deepseek-v3", "deepseekv3"), "tool_call_parser": "deepseekv3", "reasoning_parser": "deepseek-v3"},
+    {"patterns": ("glm",), "tool_call_parser": "glm47", "reasoning_parser": "glm45"},
+    {"patterns": ("kimi-k2", "kimi_k2"), "tool_call_parser": "kimi_k2", "reasoning_parser": "kimi_k2"},
+    {"patterns": ("kimi",), "tool_call_parser": "kimi_k2", "reasoning_parser": "kimi"},
+    {"patterns": ("gpt-oss",), "tool_call_parser": "gpt-oss", "reasoning_parser": "gpt-oss"},
+    {"patterns": ("mistral",), "tool_call_parser": "mistral", "reasoning_parser": "mistral"},
+    {"patterns": ("step3p5", "step-3.5", "step3.5"), "tool_call_parser": "step3p5", "reasoning_parser": "step3p5"},
+    {"patterns": ("step3", "step-3"), "tool_call_parser": "step3", "reasoning_parser": "step3"},
+    {"patterns": ("hunyuan",), "tool_call_parser": "hunyuan", "reasoning_parser": "hunyuan"},
+    {"patterns": ("gemma",), "tool_call_parser": "gemma4", "reasoning_parser": "gemma4"},
+)
+
 
 def _has_value(value: Any) -> bool:
     return value is not None and not (isinstance(value, str) and value.strip() == "")
@@ -116,6 +167,93 @@ def _to_bool(value: Any, default: bool) -> bool:
     return bool(value)
 
 
+def _extract_dict_keys_from_python(path: Path, assignment_name: str) -> tuple[str, ...]:
+    if not path.is_file():
+        return ()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return ()
+
+    keys: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.AnnAssign):
+            continue
+        target = node.target
+        if not isinstance(target, ast.Name) or target.id != assignment_name or not isinstance(node.value, ast.Dict):
+            continue
+        for key in node.value.keys:
+            if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                keys.append(key.value)
+    return tuple(dict.fromkeys(keys))
+
+
+def get_tool_call_parser_choices() -> tuple[str, ...]:
+    choices = _extract_dict_keys_from_python(TOOL_CALL_PARSER_SOURCE, "ToolCallParserEnum")
+    return choices or TOOL_CALL_PARSER_FALLBACK_CHOICES
+
+
+def get_reasoning_parser_choices() -> tuple[str, ...]:
+    choices = _extract_dict_keys_from_python(REASONING_PARSER_SOURCE, "DetectorMap")
+    return choices or REASONING_PARSER_FALLBACK_CHOICES
+
+
+def _is_ignored_path_segment(segment: str) -> bool:
+    normalized = segment.strip().lower()
+    return normalized in PATH_SEGMENTS_TO_IGNORE or re.fullmatch(r"v\d+", normalized) is not None
+
+
+def infer_served_model_name(model_path: Any) -> str:
+    if not _has_value(model_path):
+        return DEFAULTS["served_model_name"]
+    parts = [part for part in str(model_path).replace("\\", "/").split("/") if part]
+    for part in reversed(parts):
+        if not _is_ignored_path_segment(part):
+            return part
+    return DEFAULTS["served_model_name"]
+
+
+def _choose_parser(candidate: str, choices: Sequence[str], fallback: str) -> str:
+    return candidate if candidate in choices else fallback
+
+
+def infer_model_parsers(model_path: Any) -> dict[str, str]:
+    model_name = infer_served_model_name(model_path)
+    haystack = f"{model_path or ''} {model_name}".lower().replace("_", "-")
+    tool_choices = get_tool_call_parser_choices()
+    reasoning_choices = get_reasoning_parser_choices()
+    tool_fallback = _choose_parser(DEFAULTS["tool_call_parser"], tool_choices, tool_choices[0])
+    reasoning_fallback = _choose_parser(DEFAULTS["reasoning_parser"], reasoning_choices, reasoning_choices[0])
+
+    for rule in PARSER_INFERENCE_RULES:
+        if any(pattern in haystack for pattern in rule["patterns"]):
+            return {
+                "tool_call_parser": _choose_parser(rule["tool_call_parser"], tool_choices, tool_fallback),
+                "reasoning_parser": _choose_parser(rule["reasoning_parser"], reasoning_choices, reasoning_fallback),
+            }
+    return {"tool_call_parser": tool_fallback, "reasoning_parser": reasoning_fallback}
+
+
+def get_parser_metadata() -> dict[str, Any]:
+    return {
+        "tool_call_parser_choices": list(get_tool_call_parser_choices()),
+        "reasoning_parser_choices": list(get_reasoning_parser_choices()),
+        "fallbacks": {
+            "tool_call_parser": DEFAULTS["tool_call_parser"],
+            "reasoning_parser": DEFAULTS["reasoning_parser"],
+        },
+        "rules": [
+            {
+                "patterns": list(rule["patterns"]),
+                "tool_call_parser": rule["tool_call_parser"],
+                "reasoning_parser": rule["reasoning_parser"],
+            }
+            for rule in PARSER_INFERENCE_RULES
+        ],
+        "ignored_model_path_segments": sorted(PATH_SEGMENTS_TO_IGNORE),
+    }
+
+
 def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
     """Apply Issue #2 defaults when fields are omitted, blank, or null."""
     raw = {} if payload is None else dict(payload)
@@ -123,6 +261,24 @@ def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
         key: (raw[key] if key not in FIXED_FORM_DEFAULT_KEYS and _has_value(raw.get(key)) else value)
         for key, value in DEFAULTS.items()
     }
+
+    if _has_value(raw.get("model_path")) and not _has_value(raw.get("served_model_name")):
+        config["served_model_name"] = infer_served_model_name(raw["model_path"])
+
+    inferred_parsers = infer_model_parsers(config["model_path"])
+    tool_choices = get_tool_call_parser_choices()
+    reasoning_choices = get_reasoning_parser_choices()
+    config["tool_call_parser"] = (
+        raw["tool_call_parser"]
+        if _has_value(raw.get("tool_call_parser")) and raw["tool_call_parser"] in tool_choices
+        else inferred_parsers["tool_call_parser"]
+    )
+    config["reasoning_parser"] = (
+        raw["reasoning_parser"]
+        if _has_value(raw.get("reasoning_parser")) and raw["reasoning_parser"] in reasoning_choices
+        else inferred_parsers["reasoning_parser"]
+    )
+
     config["enable_mtp"] = _to_bool(raw.get("enable_mtp"), DEFAULTS["enable_mtp"])
     config["enable_dynamic_chunking"] = _to_bool(
         raw.get("enable_dynamic_chunking"), DEFAULTS["enable_dynamic_chunking"]
@@ -290,7 +446,10 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         if path == "/api/defaults":
-            self._write_json(HTTPStatus.OK, {"defaults": {**DEFAULTS, **NCCL_ENV_DEFAULTS}})
+            self._write_json(
+                HTTPStatus.OK,
+                {"defaults": {**DEFAULTS, **NCCL_ENV_DEFAULTS}, "parser_metadata": get_parser_metadata()},
+            )
             return
         try:
             body, content_type = read_static_asset(path)

@@ -18,7 +18,6 @@ const fieldGroups = {
   ],
   disaggregation: [
     { name: 'dist_init_addr', label: 'Dist init address' },
-    { name: 'disaggregation_mode', label: 'Mode' },
     { name: 'disaggregation_transfer_backend', label: 'Transfer backend' },
     { name: 'disaggregation_ib_device', label: 'IB devices', wide: true },
   ],
@@ -29,8 +28,11 @@ const fieldGroups = {
   ],
 };
 
+const ignoredModelPathSegments = new Set(['mnt', 'mount', 'model', 'models', 'vllm', 'sglang', 'workspace', 'data', 'api']);
+
 const state = {
   defaults: {},
+  parserMetadata: {},
   refreshTimer: null,
 };
 
@@ -130,6 +132,50 @@ function updateExpertOverlapVisibility() {
   }
 }
 
+function inferServedModelName(modelPath) {
+  const parts = String(modelPath || '').replaceAll('\\', '/').split('/').filter(Boolean);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    const normalized = part.trim().toLowerCase();
+    if (!ignoredModelPathSegments.has(normalized) && !/^v\d+$/.test(normalized)) return part;
+  }
+  return state.defaults.served_model_name || '';
+}
+
+function parserChoice(candidate, choices, fallback) {
+  return choices?.includes(candidate) ? candidate : fallback;
+}
+
+function inferModelParsers(modelPath) {
+  const modelName = inferServedModelName(modelPath);
+  const haystack = `${modelPath || ''} ${modelName}`.toLowerCase().replaceAll('_', '-');
+  const toolChoices = state.parserMetadata.tool_call_parser_choices || [];
+  const reasoningChoices = state.parserMetadata.reasoning_parser_choices || [];
+  const fallbacks = state.parserMetadata.fallbacks || {};
+  const toolFallback = parserChoice(fallbacks.tool_call_parser || state.defaults.tool_call_parser, toolChoices, state.defaults.tool_call_parser || '');
+  const reasoningFallback = parserChoice(fallbacks.reasoning_parser || state.defaults.reasoning_parser, reasoningChoices, state.defaults.reasoning_parser || '');
+
+  for (const rule of state.parserMetadata.rules || []) {
+    if ((rule.patterns || []).some((pattern) => haystack.includes(pattern))) {
+      return {
+        tool_call_parser: parserChoice(rule.tool_call_parser, toolChoices, toolFallback),
+        reasoning_parser: parserChoice(rule.reasoning_parser, reasoningChoices, reasoningFallback),
+      };
+    }
+  }
+  return { tool_call_parser: toolFallback, reasoning_parser: reasoningFallback };
+}
+
+function syncModelDerivedDefaults(modelPath) {
+  const servedModelInput = form.querySelector('input[name="served_model_name"]');
+  const toolParserInput = form.querySelector('input[name="tool_call_parser"]');
+  const reasoningParserInput = form.querySelector('input[name="reasoning_parser"]');
+  if (servedModelInput) servedModelInput.value = inferServedModelName(modelPath);
+  const parsers = inferModelParsers(modelPath);
+  if (toolParserInput) toolParserInput.value = parsers.tool_call_parser;
+  if (reasoningParserInput) reasoningParserInput.value = parsers.reasoning_parser;
+}
+
 function setStatus(message, tone = 'loading') {
   statusText.textContent = message;
   statusDot.className = `status-dot ${tone === 'ready' ? 'ready' : tone === 'error' ? 'error' : ''}`.trim();
@@ -211,6 +257,7 @@ async function loadDefaults() {
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || 'Failed to load defaults');
     state.defaults = body.defaults;
+    state.parserMetadata = body.parser_metadata || {};
     applyDefaults();
     await refreshCommand();
   } catch (error) {
@@ -246,6 +293,7 @@ form.addEventListener('input', (event) => {
     dpSizeInput.value = worldSizeInput.value;
   }
   if (moeModeInputs.includes(event.target)) updateExpertOverlapVisibility();
+  if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value);
   scheduleRefresh();
 });
 resetButton.addEventListener('click', () => {

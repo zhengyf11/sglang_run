@@ -26,7 +26,7 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertNotIn("--speculative-num-steps", cmd)
         self.assertNotIn("--speculative-eagle-topk", cmd)
         self.assertNotIn("--speculative-num-draft-tokens", cmd)
-        self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.7")
+        self.assertEqual(cmd[cmd.index("--mem-fraction-static") + 1], "0.9")
         self.assertEqual(cmd[cmd.index("--host") + 1], "0.0.0.0")
         self.assertEqual(cmd[cmd.index("--port") + 1], "30000")
         self.assertEqual(cmd[cmd.index("--nnodes") + 1], "1")
@@ -133,6 +133,58 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--max-running-requests") + 1], "64")
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "4096")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "32768")
+
+    def test_disaggregation_mode_is_fixed_to_prefill(self) -> None:
+        response = prefill_command_web.build_command_response({"disaggregation_mode": "decode"})
+        cmd = response["command"]
+
+        self.assertEqual(response["config"]["disaggregation_mode"], "prefill")
+        self.assertEqual(cmd[cmd.index("--disaggregation-mode") + 1], "prefill")
+
+    def test_served_model_name_is_inferred_from_model_path(self) -> None:
+        cases = (
+            ("/mnt/GLM-5.1-FP8", "GLM-5.1-FP8"),
+            ("/mnt/models/Qwen3-235B-A22B/v1", "Qwen3-235B-A22B"),
+            ("/models/Qwen3-Coder-480B-A35B-Instruct", "Qwen3-Coder-480B-A35B-Instruct"),
+            (r"D:\models\DeepSeek-V3.2\v1", "DeepSeek-V3.2"),
+            ("/models/unknown-model", "unknown-model"),
+        )
+        for model_path, expected_name in cases:
+            with self.subTest(model_path=model_path):
+                config = prefill_command_web.normalize_form_payload({"model_path": model_path})
+
+                self.assertEqual(config["served_model_name"], expected_name)
+
+    def test_model_path_infers_registered_parser_defaults(self) -> None:
+        cases = (
+            ("/mnt/GLM-5.1-FP8", "glm47", "glm45"),
+            ("/mnt/models/Qwen3-235B-A22B/v1", "qwen", "qwen3"),
+            ("/models/Qwen3-Coder-480B-A35B-Instruct", "qwen3_coder", "qwen3"),
+            (r"D:\models\DeepSeek-V3.2\v1", "deepseekv32", "deepseek-v3"),
+            ("/models/unknown-model", "glm47", "glm45"),
+        )
+        tool_choices = prefill_command_web.get_tool_call_parser_choices()
+        reasoning_choices = prefill_command_web.get_reasoning_parser_choices()
+        for model_path, expected_tool, expected_reasoning in cases:
+            with self.subTest(model_path=model_path):
+                config = prefill_command_web.normalize_form_payload({"model_path": model_path})
+
+                self.assertEqual(config["tool_call_parser"], expected_tool)
+                self.assertEqual(config["reasoning_parser"], expected_reasoning)
+                self.assertIn(config["tool_call_parser"], tool_choices)
+                self.assertIn(config["reasoning_parser"], reasoning_choices)
+
+    def test_invalid_parser_payload_values_fall_back_to_inferred_registered_values(self) -> None:
+        config = prefill_command_web.normalize_form_payload(
+            {
+                "model_path": "/mnt/models/Qwen3-235B-A22B/v1",
+                "tool_call_parser": "not-a-parser",
+                "reasoning_parser": "not-a-parser",
+            }
+        )
+
+        self.assertEqual(config["tool_call_parser"], "qwen")
+        self.assertEqual(config["reasoning_parser"], "qwen3")
 
     def test_attention_dp_parallel_defaults_dp_size_to_world_size(self) -> None:
         cmd = prefill_command_web.build_command_response(
@@ -405,7 +457,11 @@ class HandlerTests(unittest.TestCase):
         body = self._json_response(handler)
 
         self.assertEqual(body["defaults"]["model_path"], "/mnt/GLM-5.1-FP8")
+        self.assertEqual(body["defaults"]["mem_fraction_static"], 0.9)
         self.assertEqual(body["defaults"]["NCCL_IB_GID_INDEX"], "3")
+        self.assertIn("glm47", body["parser_metadata"]["tool_call_parser_choices"])
+        self.assertIn("glm45", body["parser_metadata"]["reasoning_parser_choices"])
+        self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "glm47")
 
     def test_post_api_command_returns_shell_command(self) -> None:
         handler = self._make_handler(
@@ -512,6 +568,10 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertNotIn("NCCL_IB_TC", js)
         self.assertNotIn("NCCL_IB_TIMEOUT", js)
         self.assertNotIn("NCCL_IB_RETRY_CNT", js)
+        self.assertNotIn("{ name: 'disaggregation_mode', label: 'Mode' }", js)
+        self.assertNotIn('name="disaggregation_mode"', html)
+        self.assertIn("syncModelDerivedDefaults", js)
+        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value);", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
