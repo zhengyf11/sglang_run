@@ -21,6 +21,8 @@ SGLANG_SOURCE_DIR = Path(r"D:\AI agent\code\sglang-main-20260519")
 TOOL_CALL_PARSER_SOURCE = SGLANG_SOURCE_DIR / "python" / "sglang" / "srt" / "function_call" / "function_call_parser.py"
 REASONING_PARSER_SOURCE = SGLANG_SOURCE_DIR / "python" / "sglang" / "srt" / "parser" / "reasoning_parser.py"
 
+UNKNOWN_PARSER = "unknown"
+
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
     "served_model_name": "GLM-5.1-FP8",
@@ -33,8 +35,8 @@ DEFAULTS: dict[str, Any] = {
     "moe_parallel_mode": "tensor",
     "enable_single_batch_overlap": False,
     "enable_two_batch_overlap": False,
-    "tool_call_parser": "glm47",
-    "reasoning_parser": "glm45",
+    "tool_call_parser": UNKNOWN_PARSER,
+    "reasoning_parser": UNKNOWN_PARSER,
     "enable_mtp": False,
     "speculative_algorithm": "EAGLE",
     "speculative_num_steps": 3,
@@ -120,12 +122,14 @@ PATH_SEGMENTS_TO_IGNORE = {
 }
 
 TOOL_CALL_PARSER_FALLBACK_CHOICES = (
+    UNKNOWN_PARSER,
     "deepseekv3", "deepseekv31", "deepseekv32", "deepseekv4", "glm", "glm45", "glm47",
     "gpt-oss", "kimi_k2", "lfm2", "llama3", "mimo", "mistral", "poolside_v1", "pythonic",
     "qwen", "qwen25", "qwen3_coder", "step3", "step3p5", "minimax-m2", "trinity",
     "interns1", "hermes", "hunyuan", "gigachat3", "gemma4",
 )
 REASONING_PARSER_FALLBACK_CHOICES = (
+    UNKNOWN_PARSER,
     "deepseek-r1", "deepseek-v3", "deepseek-v4", "glm45", "hunyuan", "gpt-oss", "kimi",
     "kimi_k2", "mimo", "poolside_v1", "qwen3", "qwen3-thinking", "minimax",
     "minimax-append-think", "step3", "step3p5", "mistral", "nemotron_3", "interns1", "gemma4",
@@ -142,6 +146,7 @@ PARSER_INFERENCE_RULES: tuple[dict[str, Any], ...] = (
     {"patterns": ("deepseek-r1",), "tool_call_parser": "deepseekv3", "reasoning_parser": "deepseek-r1"},
     {"patterns": ("deepseek-v3", "deepseekv3"), "tool_call_parser": "deepseekv3", "reasoning_parser": "deepseek-v3"},
     {"patterns": ("glm",), "tool_call_parser": "glm47", "reasoning_parser": "glm45"},
+    {"patterns": ("minimax-m2", "minimax"), "tool_call_parser": "minimax-m2", "reasoning_parser": "minimax"},
     {"patterns": ("kimi-k2", "kimi_k2"), "tool_call_parser": "kimi_k2", "reasoning_parser": "kimi_k2"},
     {"patterns": ("kimi",), "tool_call_parser": "kimi_k2", "reasoning_parser": "kimi"},
     {"patterns": ("gpt-oss",), "tool_call_parser": "gpt-oss", "reasoning_parser": "gpt-oss"},
@@ -188,14 +193,18 @@ def _extract_dict_keys_from_python(path: Path, assignment_name: str) -> tuple[st
     return tuple(dict.fromkeys(keys))
 
 
+def _merge_parser_choices(primary: Sequence[str], fallback: Sequence[str]) -> tuple[str, ...]:
+    return tuple(dict.fromkeys([*primary, *fallback]))
+
+
 def get_tool_call_parser_choices() -> tuple[str, ...]:
     choices = _extract_dict_keys_from_python(TOOL_CALL_PARSER_SOURCE, "ToolCallParserEnum")
-    return choices or TOOL_CALL_PARSER_FALLBACK_CHOICES
+    return _merge_parser_choices(choices, TOOL_CALL_PARSER_FALLBACK_CHOICES)
 
 
 def get_reasoning_parser_choices() -> tuple[str, ...]:
     choices = _extract_dict_keys_from_python(REASONING_PARSER_SOURCE, "DetectorMap")
-    return choices or REASONING_PARSER_FALLBACK_CHOICES
+    return _merge_parser_choices(choices, REASONING_PARSER_FALLBACK_CHOICES)
 
 
 def _is_ignored_path_segment(segment: str) -> bool:
@@ -222,8 +231,8 @@ def infer_model_parsers(model_path: Any) -> dict[str, str]:
     haystack = f"{model_path or ''} {model_name}".lower().replace("_", "-")
     tool_choices = get_tool_call_parser_choices()
     reasoning_choices = get_reasoning_parser_choices()
-    tool_fallback = _choose_parser(DEFAULTS["tool_call_parser"], tool_choices, tool_choices[0])
-    reasoning_fallback = _choose_parser(DEFAULTS["reasoning_parser"], reasoning_choices, reasoning_choices[0])
+    tool_fallback = DEFAULTS["tool_call_parser"]
+    reasoning_fallback = DEFAULTS["reasoning_parser"]
 
     for rule in PARSER_INFERENCE_RULES:
         if any(pattern in haystack for pattern in rule["patterns"]):
@@ -252,6 +261,14 @@ def get_parser_metadata() -> dict[str, Any]:
         ],
         "ignored_model_path_segments": sorted(PATH_SEGMENTS_TO_IGNORE),
     }
+
+
+def get_effective_defaults() -> dict[str, Any]:
+    """Return UI/API defaults after applying model-path-derived parser values."""
+    defaults = {**DEFAULTS, **NCCL_ENV_DEFAULTS}
+    defaults.update(infer_model_parsers(defaults["model_path"]))
+    defaults["served_model_name"] = infer_served_model_name(defaults["model_path"])
+    return defaults
 
 
 def normalize_form_payload(payload: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -448,7 +465,7 @@ class PrefillCommandHandler(BaseHTTPRequestHandler):
         if path == "/api/defaults":
             self._write_json(
                 HTTPStatus.OK,
-                {"defaults": {**DEFAULTS, **NCCL_ENV_DEFAULTS}, "parser_metadata": get_parser_metadata()},
+                {"defaults": get_effective_defaults(), "parser_metadata": get_parser_metadata()},
             )
             return
         try:

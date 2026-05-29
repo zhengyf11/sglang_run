@@ -86,6 +86,8 @@ class CommandGenerationTests(unittest.TestCase):
 
         self.assertEqual(config["model_path"], "/mnt/GLM-5.1-FP8")
         self.assertEqual(config["served_model_name"], "GLM-5.1-FP8")
+        self.assertEqual(config["tool_call_parser"], "glm47")
+        self.assertEqual(config["reasoning_parser"], "glm45")
         self.assertEqual(config["parallel_tp_size"], 8)
         self.assertEqual(config["dp_size"], 8)
         self.assertEqual(config["attention_parallel_mode"], "tensor")
@@ -161,7 +163,10 @@ class CommandGenerationTests(unittest.TestCase):
             ("/mnt/models/Qwen3-235B-A22B/v1", "qwen", "qwen3"),
             ("/models/Qwen3-Coder-480B-A35B-Instruct", "qwen3_coder", "qwen3"),
             (r"D:\models\DeepSeek-V3.2\v1", "deepseekv32", "deepseek-v3"),
-            ("/models/unknown-model", "glm47", "glm45"),
+            ("/models/MiniMax-M2.7", "minimax-m2", "minimax"),
+            ("MiniMaxAI/MiniMax-M2.7", "minimax-m2", "minimax"),
+            (r"D:\models\MiniMax-M2-BF16\v1", "minimax-m2", "minimax"),
+            ("/models/unknown-model", "unknown", "unknown"),
         )
         tool_choices = prefill_command_web.get_tool_call_parser_choices()
         reasoning_choices = prefill_command_web.get_reasoning_parser_choices()
@@ -185,6 +190,18 @@ class CommandGenerationTests(unittest.TestCase):
 
         self.assertEqual(config["tool_call_parser"], "qwen")
         self.assertEqual(config["reasoning_parser"], "qwen3")
+
+    def test_unknown_parser_payload_values_are_preserved(self) -> None:
+        config = prefill_command_web.normalize_form_payload(
+            {
+                "model_path": "/mnt/models/Qwen3-235B-A22B/v1",
+                "tool_call_parser": "unknown",
+                "reasoning_parser": "unknown",
+            }
+        )
+
+        self.assertEqual(config["tool_call_parser"], "unknown")
+        self.assertEqual(config["reasoning_parser"], "unknown")
 
     def test_attention_dp_parallel_defaults_dp_size_to_world_size(self) -> None:
         cmd = prefill_command_web.build_command_response(
@@ -457,11 +474,18 @@ class HandlerTests(unittest.TestCase):
         body = self._json_response(handler)
 
         self.assertEqual(body["defaults"]["model_path"], "/mnt/GLM-5.1-FP8")
+        self.assertEqual(body["defaults"]["tool_call_parser"], "glm47")
+        self.assertEqual(body["defaults"]["reasoning_parser"], "glm45")
+        self.assertEqual(prefill_command_web.DEFAULTS["tool_call_parser"], "unknown")
+        self.assertEqual(prefill_command_web.DEFAULTS["reasoning_parser"], "unknown")
         self.assertEqual(body["defaults"]["mem_fraction_static"], 0.9)
         self.assertEqual(body["defaults"]["NCCL_IB_GID_INDEX"], "3")
+        self.assertIn("unknown", body["parser_metadata"]["tool_call_parser_choices"])
+        self.assertIn("unknown", body["parser_metadata"]["reasoning_parser_choices"])
         self.assertIn("glm47", body["parser_metadata"]["tool_call_parser_choices"])
         self.assertIn("glm45", body["parser_metadata"]["reasoning_parser_choices"])
-        self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "glm47")
+        self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "unknown")
+        self.assertEqual(body["parser_metadata"]["fallbacks"]["reasoning_parser"], "unknown")
 
     def test_post_api_command_returns_shell_command(self) -> None:
         handler = self._make_handler(
@@ -571,6 +595,10 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertNotIn("{ name: 'disaggregation_mode', label: 'Mode' }", js)
         self.assertNotIn('name="disaggregation_mode"', html)
         self.assertIn("syncModelDerivedDefaults", js)
+        self.assertIn("syncModelDerivedDefaults(form.querySelector('input[name=\"model_path\"]')?.value || state.defaults.model_path || '');", js)
+        self.assertIn("identifyButton.textContent = '识别模型';", js)
+        self.assertIn("identifyModelButton?.addEventListener('click'", js)
+        self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '');", js)
         self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value);", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
