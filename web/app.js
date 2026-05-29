@@ -6,6 +6,23 @@ const sharedModelFields = [
 ];
 
 const profileConfigs = {
+  docker_run: {
+    title: 'Docker Run parameters',
+    formId: 'docker-run-command-form',
+    usesSharedModel: false,
+    groups: {
+      container: [
+        { name: 'image', label: 'Image', wide: true },
+        { name: 'container_name', label: 'Container name' },
+        { name: 'shm_size', label: 'Shm size' },
+      ],
+      extra: [
+        { name: 'volume', label: 'Volumes (one per line)', type: 'textarea', wide: true },
+        { name: 'env', label: 'Environment variables (one per line)', type: 'textarea', wide: true },
+        { name: 'docker_arg', label: 'Extra Docker args (one per line)', type: 'textarea', wide: true },
+      ],
+    },
+  },
   prefill: {
     title: 'Prefill parameters',
     formId: 'prefill-command-form',
@@ -80,7 +97,7 @@ const ignoredModelPathSegments = new Set(['mnt', 'mount', 'model', 'models', 'vl
 const profiles = Object.keys(profileConfigs);
 
 const state = {
-  activeProfile: 'prefill',
+  activeProfile: 'docker_run',
   defaultsByProfile: {},
   parserMetadata: {},
   refreshTimer: null,
@@ -110,9 +127,9 @@ function createField({ name, label, type = 'text', wide = false }, profile) {
   wrapper.className = wide ? 'field wide' : 'field';
   wrapper.textContent = label;
 
-  const input = document.createElement('input');
+  const input = type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
   input.name = name;
-  input.type = type;
+  if (input instanceof HTMLInputElement) input.type = type;
   input.autocomplete = 'off';
 
   const hint = document.createElement('span');
@@ -308,9 +325,14 @@ function applyDefaults(profile = state.activeProfile) {
   updateExpertOverlapVisibility(profile);
 }
 
+function activeUsesSharedModel() {
+  return profileConfigs[state.activeProfile]?.usesSharedModel !== false;
+}
+
 function collectPayload() {
   const payload = { profile: state.activeProfile };
-  for (const form of [sharedModelForm, activeForm()]) {
+  const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];
+  for (const form of payloadForms) {
     for (const element of form.elements) {
       if (!element.name || element.disabled) continue;
       if (element.type === 'radio' && !element.checked) continue;
@@ -358,7 +380,7 @@ async function loadAllDefaults() {
   setStatus('Loading defaults…');
   try {
     for (const profile of profiles) await loadDefaults(profile);
-    switchProfile('prefill', { refresh: false });
+    switchProfile('docker_run', { refresh: false });
     await refreshCommand();
   } catch (error) {
     setStatus('Defaults unavailable', 'error');
@@ -372,7 +394,8 @@ function switchProfile(profile, { refresh = true } = {}) {
     panels[current].hidden = current !== profile;
     profileButtons.find((button) => button.dataset.profileButton === current)?.classList.toggle('active', current === profile);
   }
-  applyModelDefaults(profile);
+  sharedModelForm.hidden = !activeUsesSharedModel();
+  if (activeUsesSharedModel()) applyModelDefaults(profile);
   if (refresh) refreshCommand();
 }
 
