@@ -100,6 +100,7 @@ const state = {
   defaultsByProfile: {},
   parserMetadata: {},
   refreshTimer: null,
+  lastDockerRunModelVolume: '',
 };
 
 const sharedModelForm = document.querySelector('#shared-model-form');
@@ -126,23 +127,16 @@ function createListField({ name, label, placeholder = '', samePathMapping = fals
   wrapper.className = wide ? 'field list-field wide' : 'field list-field';
   wrapper.dataset.listField = name;
 
+  const heading = document.createElement('div');
+  heading.className = 'list-field-heading';
   const labelText = document.createElement('span');
   labelText.textContent = label;
-
-  const inputRow = document.createElement('div');
-  inputRow.className = 'list-input-row';
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.autocomplete = 'off';
-  input.placeholder = placeholder;
-  input.dataset.listInput = name;
-  if (samePathMapping) input.dataset.samePathMapping = 'true';
   const addButton = document.createElement('button');
   addButton.type = 'button';
   addButton.className = 'secondary-button add-list-item-button';
   addButton.dataset.addListItem = name;
   addButton.textContent = '添加';
-  inputRow.append(input, addButton);
+  heading.append(labelText, addButton);
 
   const list = document.createElement('div');
   list.className = 'list-items';
@@ -151,11 +145,13 @@ function createListField({ name, label, placeholder = '', samePathMapping = fals
   hiddenInput.type = 'hidden';
   hiddenInput.name = name;
   hiddenInput.dataset.listValue = name;
+  if (samePathMapping) hiddenInput.dataset.samePathMapping = 'true';
+  hiddenInput.dataset.placeholder = placeholder;
 
   const hint = document.createElement('span');
   hint.className = 'hint';
   hint.dataset.hintFor = name;
-  wrapper.append(labelText, inputRow, list, hiddenInput, hint);
+  wrapper.append(heading, list, hiddenInput, hint);
   return wrapper;
 }
 
@@ -344,22 +340,39 @@ function setListFieldItems(field, values) {
   const list = wrapper?.querySelector(`[data-list-items="${field}"]`);
   const hiddenInput = wrapper?.querySelector(`[data-list-value="${field}"]`);
   if (!list || !hiddenInput) return;
-  const normalizedValues = values.map((value) => String(value || '').trim()).filter(Boolean);
-  list.replaceChildren(...normalizedValues.map((value) => {
-    const item = document.createElement('div');
-    item.className = 'list-item';
-    const text = document.createElement('span');
-    text.textContent = value;
-    const deleteButton = document.createElement('button');
-    deleteButton.type = 'button';
-    deleteButton.className = 'delete-list-item-button';
-    deleteButton.dataset.deleteListItem = field;
-    deleteButton.dataset.value = value;
-    deleteButton.textContent = '删除';
-    item.append(text, deleteButton);
-    return item;
-  }));
-  hiddenInput.value = normalizedValues.join('\n');
+  const normalizedValues = values.map((value) => String(value || '').trim());
+  list.replaceChildren(...normalizedValues.map((value, index) => createListItem(field, value, index, hiddenInput)));
+  syncListFieldValue(field);
+}
+
+function createListItem(field, value, index, hiddenInput) {
+  const item = document.createElement('div');
+  item.className = 'list-item';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.autocomplete = 'off';
+  input.value = value;
+  input.placeholder = hiddenInput.dataset.placeholder || '';
+  input.dataset.listItemInput = field;
+  input.dataset.index = String(index);
+  const deleteButton = document.createElement('button');
+  deleteButton.type = 'button';
+  deleteButton.className = 'delete-list-item-button';
+  deleteButton.dataset.deleteListItem = field;
+  deleteButton.dataset.index = String(index);
+  deleteButton.textContent = '删除';
+  item.append(input, deleteButton);
+  return item;
+}
+
+function syncListFieldValue(field) {
+  const wrapper = document.querySelector(`[data-list-field="${field}"]`);
+  const hiddenInput = wrapper?.querySelector(`[data-list-value="${field}"]`);
+  if (!wrapper || !hiddenInput) return;
+  const values = Array.from(wrapper.querySelectorAll(`[data-list-item-input="${field}"]`))
+    .map((input) => input.value.trim())
+    .filter(Boolean);
+  hiddenInput.value = values.join('\n');
 }
 
 function getListFieldItems(field) {
@@ -368,19 +381,16 @@ function getListFieldItems(field) {
 }
 
 function addListFieldItem(field) {
-  const input = document.querySelector(`[data-list-input="${field}"]`);
-  const rawValue = input?.value?.trim();
-  if (!rawValue) return;
-  const value = input.dataset.samePathMapping === 'true' ? `${rawValue}:${rawValue}` : rawValue;
-  const values = getListFieldItems(field);
-  if (!values.includes(value)) values.push(value);
-  setListFieldItems(field, values);
-  input.value = '';
+  setListFieldItems(field, [...getListFieldItems(field), '']);
+  const inputs = document.querySelectorAll(`[data-list-item-input="${field}"]`);
+  inputs[inputs.length - 1]?.focus();
   scheduleRefresh();
 }
 
-function deleteListFieldItem(field, value) {
-  setListFieldItems(field, getListFieldItems(field).filter((item) => item !== value));
+function deleteListFieldItem(field, index) {
+  const values = getListFieldItems(field);
+  values.splice(Number(index), 1);
+  setListFieldItems(field, values);
   scheduleRefresh();
 }
 
@@ -390,7 +400,14 @@ function applyDefaults(profile = state.activeProfile) {
   for (const element of form.elements) {
     if (!element.name) continue;
     const value = defaults[element.name];
-    if (element.dataset.listValue) setListFieldItems(element.name, String(value ?? '').split('\n'));
+    if (element.dataset.listValue) {
+      setListFieldItems(element.name, String(value ?? '').split('\n'));
+      if (profile === 'docker_run' && element.name === 'volume') {
+        const modelPath = sharedModelForm?.querySelector('input[name="model_path"]')?.value || defaults.model_path || '';
+        const modelVolume = String(modelPath || '').trim();
+        state.lastDockerRunModelVolume = modelVolume ? `${modelVolume}:${modelVolume}` : '';
+      }
+    }
     else if (element.type === 'checkbox') element.checked = Boolean(value);
     else if (element.type === 'radio') element.checked = element.value === String(value ?? '');
     else {
@@ -414,14 +431,15 @@ function activeUsesSharedModel() {
   return profileConfigs[state.activeProfile]?.usesSharedModel !== false;
 }
 
-function appendDockerRunModelVolume(payload) {
-  if (payload.profile !== 'docker_run') return;
-  const modelPath = String(payload.model_path || '').trim();
-  if (!modelPath) return;
-  const modelVolume = `${modelPath}:${modelPath}`;
-  const volumes = String(payload.volume || '').split('\n').map((value) => value.trim()).filter(Boolean);
-  if (!volumes.includes(modelVolume)) volumes.push(modelVolume);
-  payload.volume = volumes.join('\n');
+function syncDockerRunModelVolume(modelPath) {
+  const modelVolume = String(modelPath || '').trim();
+  const nextModelVolume = modelVolume ? `${modelVolume}:${modelVolume}` : '';
+  const values = getListFieldItems('volume');
+  const previousIndex = state.lastDockerRunModelVolume ? values.indexOf(state.lastDockerRunModelVolume) : -1;
+  if (previousIndex >= 0) values[previousIndex] = nextModelVolume;
+  else if (nextModelVolume && !values.includes(nextModelVolume)) values.push(nextModelVolume);
+  state.lastDockerRunModelVolume = nextModelVolume;
+  setListFieldItems('volume', values.filter(Boolean));
 }
 
 function collectPayload() {
@@ -434,7 +452,6 @@ function collectPayload() {
       payload[element.name] = element.type === 'checkbox' ? element.checked : element.value;
     }
   }
-  appendDockerRunModelVolume(payload);
   return payload;
 }
 
@@ -512,12 +529,17 @@ async function copyOutput(targetId, button) {
 
 renderFields();
 sharedModelForm.addEventListener('input', (event) => {
-  if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, state.activeProfile);
+  if (event.target.name === 'model_path') {
+    syncModelDerivedDefaults(event.target.value, state.activeProfile);
+    if (state.activeProfile === 'docker_run') syncDockerRunModelVolume(event.target.value);
+  }
   scheduleRefresh();
 });
 
 for (const profile of profiles) {
   forms[profile].addEventListener('input', (event) => {
+    const listInput = event.target.closest?.('[data-list-item-input]');
+    if (listInput) syncListFieldValue(listInput.dataset.listItemInput);
     if (event.target.name === 'enable_mtp') updateMtpVisibility(profile);
     const controls = getProfileControls(profile);
     if (controls.attentionModeInputs.includes(event.target)) {
@@ -551,7 +573,7 @@ document.addEventListener('click', (event) => {
   }
   const deleteListButton = event.target.closest('[data-delete-list-item]');
   if (deleteListButton) {
-    deleteListFieldItem(deleteListButton.dataset.deleteListItem, deleteListButton.dataset.value);
+    deleteListFieldItem(deleteListButton.dataset.deleteListItem, deleteListButton.dataset.index);
     return;
   }
   const copyButton = event.target.closest('[data-copy-target]');

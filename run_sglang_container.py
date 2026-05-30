@@ -13,6 +13,8 @@ from typing import Sequence
 DEFAULT_IMAGE = "lmsysorg/sglang:latest"
 DEFAULT_CONTAINER_NAME = "sglang"
 DEFAULT_SHM_SIZE = "32g"
+DEFAULT_VOLUMES = ("/sys/fs/cgroup:/sys/fs/cgroup:ro",)
+DEFAULT_ENVS = ("NVIDIA_VISIBLE_DEVICES=all",)
 KEEPALIVE_COMMAND = "tail -f /dev/null"
 
 
@@ -75,14 +77,14 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     docker_group.add_argument(
         "--volume",
         action="append",
-        default=[],
+        default=list(DEFAULT_VOLUMES),
         metavar="HOST:CONTAINER[:MODE]",
         help="Docker volume mapping. Can be repeated.",
     )
     docker_group.add_argument(
         "--env",
         action="append",
-        default=[],
+        default=list(DEFAULT_ENVS),
         metavar="KEY=VALUE",
         help="Environment variable passed to Docker. Can be repeated.",
     )
@@ -125,12 +127,6 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
             "all",
             "--ulimit",
             "memlock=-1:-1",
-            "-v",
-            "/sys/fs/cgroup:/sys/fs/cgroup:ro",
-            "-e",
-            "NVIDIA_VISIBLE_DEVICES=all",
-            "--entrypoint",
-            "/bin/bash",
         ]
     )
 
@@ -139,6 +135,7 @@ def build_docker_command(args: argparse.Namespace) -> list[str]:
     for env_var in args.env:
         cmd.extend(["-e", env_var])
     cmd.extend(args.docker_arg)
+    cmd.extend(["--entrypoint", "/bin/bash"])
 
     cmd.extend([args.image, "-lc", KEEPALIVE_COMMAND])
     return cmd

@@ -98,14 +98,20 @@ ROUTER_DEFAULTS: dict[str, Any] = {
     "extra_router_args": "",
 }
 
+DOCKER_RUN_DEFAULT_VOLUMES = (
+    "/sys/fs/cgroup:/sys/fs/cgroup:ro",
+    f"{DEFAULTS['model_path']}:{DEFAULTS['model_path']}",
+)
+DOCKER_RUN_DEFAULT_ENVS = ("NVIDIA_VISIBLE_DEVICES=all",)
+
 DOCKER_RUN_DEFAULTS: dict[str, Any] = {
     "model_path": DEFAULTS["model_path"],
     "image": DEFAULT_IMAGE,
     "container_name": DEFAULT_CONTAINER_NAME,
     "shm_size": DEFAULT_SHM_SIZE,
     "rm": True,
-    "volume": "",
-    "env": "",
+    "volume": "\n".join(DOCKER_RUN_DEFAULT_VOLUMES),
+    "env": "\n".join(DOCKER_RUN_DEFAULT_ENVS),
 }
 
 PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
@@ -399,8 +405,12 @@ def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PRE
             for key, value in defaults.items()
         }
         config["rm"] = _to_bool(raw.get("rm"), defaults["rm"])
-        config["volume"] = _append_unique(_parse_lines(config.get("volume")), _docker_model_volume(config.get("model_path")))
-        config["env"] = _parse_lines(config.get("env"))
+        if _has_value(raw.get("model_path")) and "volume" not in raw:
+            config["volume"] = "\n".join(
+                [DOCKER_RUN_DEFAULT_VOLUMES[0], _docker_model_volume(config.get("model_path")) or ""]
+            )
+        config["volume"] = _parse_lines(raw["volume"] if "volume" in raw else config.get("volume"))
+        config["env"] = _parse_lines(raw["env"] if "env" in raw else config.get("env"))
         return config
     fixed_keys = set(FIXED_FORM_DEFAULT_KEYS)
     config = {
