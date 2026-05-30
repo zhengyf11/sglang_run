@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -1036,11 +1037,24 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn('<section class="profile-panel" data-profile-panel="docker_run" hidden>', html)
         self.assertIn('id="host-check-command-form"', html)
         self.assertIn('class="panel form-panel host-check-panel"', html)
+        removed_intro = "Review Issue #19 host prerequisites before Docker Run. These check and repair commands are display-only and must be copied and run manually after review."
+        self.assertNotIn(removed_intro, html)
+        self.assertNotIn("host-check-intro", html)
+        self.assertNotIn("host-check-intro", css)
+        self.assertEqual(html.count('class="host-check-card"'), 3)
+        self.assertIn('id="host-check-rdma-heading"', html)
+        self.assertIn('id="host-check-runtime-heading"', html)
+        self.assertIn('id="host-check-roce-heading"', html)
         self.assertIn("host_check: {", js)
         self.assertIn("usesSharedModel: false", js)
         self.assertIn("activeProfile: 'host_check'", js)
         self.assertIn("switchProfile('host_check', { refresh: false });", js)
-        self.assertIn(".host-check-grid", css)
+        host_check_grid_rule = re.search(r"\.host-check-grid\s*\{(?P<body>[^}]*)\}", css)
+        self.assertIsNotNone(host_check_grid_rule)
+        self.assertIn("grid-template-columns: minmax(0, 1fr);", host_check_grid_rule.group("body"))
+        self.assertNotIn("repeat(3, minmax(0, 1fr))", host_check_grid_rule.group("body"))
+        medium_media_body = css.split("@media (max-width: 1020px) {", 1)[1].split("@media (max-width: 680px) {", 1)[0]
+        self.assertNotIn(".host-check-grid", medium_media_body)
         self.assertIn(".host-check-card", css)
         for expected in (
             "RdmaTransport: Failed to register memory",
