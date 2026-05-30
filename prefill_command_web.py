@@ -35,7 +35,34 @@ PREFILL_PROFILE = "prefill"
 DECODE_PROFILE = "decode"
 ROUTER_PROFILE = "router"
 DOCKER_RUN_PROFILE = "docker_run"
-SUPPORTED_PROFILES = {PREFILL_PROFILE, DECODE_PROFILE, ROUTER_PROFILE, DOCKER_RUN_PROFILE}
+HOST_CHECK_PROFILE = "host_check"
+SUPPORTED_PROFILES = {PREFILL_PROFILE, DECODE_PROFILE, ROUTER_PROFILE, DOCKER_RUN_PROFILE, HOST_CHECK_PROFILE}
+
+HOST_CHECK_ITEMS: tuple[dict[str, str], ...] = (
+    {
+        "title": "RDMA memory registration",
+        "problem": "RdmaTransport: Failed to register memory; common causes are memlock not being unlimited and nvidia_peermem not being loaded.",
+        "check_shell": "ulimit -l\nlsmod | grep nvidia_peermem || true",
+        "repair_shell": "ulimit -l unlimited\nsudo modprobe nvidia_peermem",
+    },
+    {
+        "title": "NVIDIA container runtime hook",
+        "problem": "docker: Error response from daemon: exec: \"nvidia-container-runtime-hook\": executable file not found in $PATH.",
+        "check_shell": "which nvidia-container-runtime-hook || true\nnvidia-ctk --version\nsudo docker info | grep -i 'runtime\\|nvidia' || true",
+        "repair_shell": "sudo nvidia-ctk runtime configure --runtime=docker\nsudo systemctl restart docker",
+    },
+    {
+        "title": "RoCE bond / netplan",
+        "problem": "RoCE bond/netplan configuration may affect show_gids and the network environment; Issue #19 records checking /etc/netplan, removing 01-netcfg.yaml, applying netplan, and running show_gids.",
+        "check_shell": "ls /etc/netplan\nshow_gids",
+        "repair_shell": "sudo rm -i /etc/netplan/01-netcfg.yaml\nsudo netplan apply\nshow_gids",
+    },
+)
+
+HOST_CHECK_DEFAULTS: dict[str, Any] = {
+    "issue": "https://github.com/zhengyf11/sglang_run/issues/19",
+    "items": HOST_CHECK_ITEMS,
+}
 
 DEFAULTS: dict[str, Any] = {
     "model_path": "/mnt/GLM-5.1-FP8",
@@ -119,6 +146,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
     DECODE_PROFILE: DECODE_DEFAULTS,
     ROUTER_PROFILE: ROUTER_DEFAULTS,
     DOCKER_RUN_PROFILE: DOCKER_RUN_DEFAULTS,
+    HOST_CHECK_PROFILE: HOST_CHECK_DEFAULTS,
 }
 
 NCCL_ENV_DEFAULTS = {
@@ -362,7 +390,7 @@ def get_effective_defaults(profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     defaults = dict(base_defaults)
     if normalized_profile in {PREFILL_PROFILE, DECODE_PROFILE}:
         defaults.update(NCCL_ENV_DEFAULTS)
-    if normalized_profile == DOCKER_RUN_PROFILE:
+    if normalized_profile in {DOCKER_RUN_PROFILE, HOST_CHECK_PROFILE}:
         return defaults
     defaults.update(infer_model_parsers(defaults["model_path"]))
     if normalized_profile == ROUTER_PROFILE:
@@ -399,6 +427,8 @@ def normalize_form_payload(payload: Mapping[str, Any] | None, profile: str = PRE
     normalized_profile = normalize_profile(profile)
     defaults = get_profile_defaults(normalized_profile)
     raw = {} if payload is None else dict(payload)
+    if normalized_profile == HOST_CHECK_PROFILE:
+        return dict(defaults)
     if normalized_profile == DOCKER_RUN_PROFILE:
         config = {
             key: (raw[key] if _has_value(raw.get(key)) else value)
@@ -605,12 +635,49 @@ def build_shell_hints(config: Mapping[str, Any]) -> list[str]:
     return []
 
 
+def build_host_check_shell(items: Sequence[Mapping[str, str]] = HOST_CHECK_ITEMS) -> str:
+    sections: list[str] = []
+    for item in items:
+        sections.append(
+            "\n".join(
+                [
+                    f"# {item['title']}",
+                    f"# Problem: {item['problem']}",
+                    "# Check",
+                    item["check_shell"],
+                    "# Repair (review before running manually)",
+                    item["repair_shell"],
+                ]
+            )
+        )
+    return "\n\n".join(sections)
+
+
+def build_host_check_response() -> dict[str, Any]:
+    config = dict(HOST_CHECK_DEFAULTS)
+    shell = build_host_check_shell(HOST_CHECK_ITEMS)
+    return {
+        "profile": HOST_CHECK_PROFILE,
+        "config": config,
+        "command": [],
+        "shell_command": shell,
+        "resource_limits": [],
+        "env_exports": [],
+        "shell_hints": [],
+        "proxy_unsets": [],
+        "combined_shell": shell,
+        "executed": False,
+    }
+
+
 def build_resource_limits(profile: str) -> list[str]:
     return ["ulimit -l unlimited", "ulimit -n 65535"] if normalize_profile(profile) == DECODE_PROFILE else []
 
 
 def build_command_response(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
     normalized_profile = normalize_profile(profile)
+    if normalized_profile == HOST_CHECK_PROFILE:
+        return build_host_check_response()
     config = normalize_form_payload(payload, normalized_profile)
     command = build_profile_command(normalized_profile, config)
     resource_limits = build_resource_limits(normalized_profile)
