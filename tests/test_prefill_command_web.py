@@ -534,6 +534,35 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(response["resource_limits"], [])
         self.assertEqual(response["env_exports"], [])
 
+    def test_host_check_profile_returns_static_issue_19_shell_without_command(self) -> None:
+        response = prefill_command_web.build_command_response({"model_path": "/ignored"}, profile="host_check")
+
+        self.assertEqual(response["profile"], "host_check")
+        self.assertEqual(response["command"], [])
+        self.assertFalse(response["executed"])
+        self.assertEqual(response["resource_limits"], [])
+        self.assertEqual(response["env_exports"], [])
+        self.assertEqual(response["proxy_unsets"], [])
+        self.assertEqual(response["shell_command"], response["combined_shell"])
+        self.assertIn("https://github.com/zhengyf11/sglang_run/issues/19", response["config"]["issue"])
+        for expected in (
+            "RdmaTransport: Failed to register memory",
+            "ulimit -l",
+            "lsmod | grep nvidia_peermem || true",
+            "sudo modprobe nvidia_peermem",
+            "which nvidia-container-runtime-hook || true",
+            "nvidia-ctk --version",
+            "sudo docker info | grep -i 'runtime\\|nvidia' || true",
+            "sudo nvidia-ctk runtime configure --runtime=docker",
+            "sudo systemctl restart docker",
+            "ls /etc/netplan",
+            "sudo rm -i /etc/netplan/01-netcfg.yaml",
+            "sudo netplan apply",
+            "show_gids",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, response["combined_shell"])
+
     def test_docker_run_profile_supports_dynamic_fields_and_ignores_web_docker_arg(self) -> None:
         response = prefill_command_web.build_command_response(
             {
@@ -631,10 +660,12 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(headers["Content-Type"], "text/html; charset=utf-8")
         self.assertNotIn("Location", headers)
         self.assertIn('<form id="shared-model-form"', html)
+        self.assertIn('<form id="host-check-command-form"', html)
         self.assertIn('<form id="docker-run-command-form"', html)
         self.assertIn('<form id="prefill-command-form"', html)
         self.assertIn('<form id="decode-command-form"', html)
         self.assertIn('<form id="router-command-form"', html)
+        self.assertIn('data-profile-button="host_check"', html)
         self.assertIn('data-profile-button="docker_run"', html)
         self.assertIn('data-profile-button="prefill"', html)
         self.assertIn('data-profile-button="decode"', html)
@@ -690,11 +721,12 @@ class HandlerTests(unittest.TestCase):
         self.assertEqual(body["parser_metadata"]["fallbacks"]["tool_call_parser"], "unknown")
         self.assertEqual(body["parser_metadata"]["fallbacks"]["reasoning_parser"], "unknown")
 
-    def test_get_defaults_supports_decode_router_and_docker_run_profiles(self) -> None:
+    def test_get_defaults_supports_decode_router_docker_run_and_host_check_profiles(self) -> None:
         profile_expectations = (
             ("decode", "port", 30001),
             ("router", "port", 8000),
             ("docker_run", "image", "lmsysorg/sglang:latest"),
+            ("host_check", "issue", "https://github.com/zhengyf11/sglang_run/issues/19"),
         )
         for profile, key, expected_value in profile_expectations:
             with self.subTest(profile=profile):
@@ -767,6 +799,34 @@ class HandlerTests(unittest.TestCase):
         self.assertIn("custom/sglang:test", body["shell_command"])
         self.assertIn("-v /mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8", body["shell_command"])
         self.assertFalse(body["executed"])
+
+    def test_post_api_command_supports_host_check_profile_without_execution(self) -> None:
+        handler = self._make_handler(
+            "POST",
+            "/api/command",
+            json.dumps({"profile": "host_check"}).encode("utf-8"),
+        )
+
+        handler.do_POST()
+        body = self._json_response(handler)
+
+        self.assertEqual(body["profile"], "host_check")
+        self.assertEqual(body["command"], [])
+        self.assertFalse(body["executed"])
+        for expected in (
+            "ulimit -l",
+            "lsmod | grep nvidia_peermem || true",
+            "sudo modprobe nvidia_peermem",
+            "which nvidia-container-runtime-hook || true",
+            "sudo nvidia-ctk runtime configure --runtime=docker",
+            "sudo systemctl restart docker",
+            "ls /etc/netplan",
+            "sudo rm -i /etc/netplan/01-netcfg.yaml",
+            "sudo netplan apply",
+            "show_gids",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, body["combined_shell"])
 
     def test_invalid_json_returns_400(self) -> None:
         handler = self._make_handler("POST", "/api/command", b"{")
@@ -962,14 +1022,47 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertEqual(js.count("name: 'max_running_requests'"), 1)
         self.assertEqual(js.count("name: 'cuda_graph_max_bs'"), 1)
 
-    def test_docker_run_tab_is_first_and_has_independent_form(self) -> None:
+    def test_host_check_tab_is_first_default_active_and_before_docker_run(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
         js = Path("web/app.js").read_text(encoding="utf-8")
         css = Path("web/styles.css").read_text(encoding="utf-8")
 
+        self.assertLess(html.index('data-profile-button="host_check"'), html.index('data-profile-button="docker_run"'))
         self.assertLess(html.index('data-profile-button="docker_run"'), html.index('data-profile-button="prefill"'))
         self.assertLess(html.index('data-profile-button="prefill"'), html.index('data-profile-button="decode"'))
         self.assertLess(html.index('data-profile-button="decode"'), html.index('data-profile-button="router"'))
+        self.assertIn('<button class="profile-button active" type="button" data-profile-button="host_check">Host Check</button>', html)
+        self.assertIn('<section class="profile-panel" data-profile-panel="host_check">', html)
+        self.assertIn('<section class="profile-panel" data-profile-panel="docker_run" hidden>', html)
+        self.assertIn('id="host-check-command-form"', html)
+        self.assertIn('class="panel form-panel host-check-panel"', html)
+        self.assertIn("host_check: {", js)
+        self.assertIn("usesSharedModel: false", js)
+        self.assertIn("activeProfile: 'host_check'", js)
+        self.assertIn("switchProfile('host_check', { refresh: false });", js)
+        self.assertIn(".host-check-grid", css)
+        self.assertIn(".host-check-card", css)
+        for expected in (
+            "RdmaTransport: Failed to register memory",
+            "ulimit -l",
+            "lsmod | grep nvidia_peermem || true",
+            "sudo modprobe nvidia_peermem",
+            "which nvidia-container-runtime-hook || true",
+            "sudo nvidia-ctk runtime configure --runtime=docker",
+            "sudo systemctl restart docker",
+            "ls /etc/netplan",
+            "sudo rm -i /etc/netplan/01-netcfg.yaml",
+            "sudo netplan apply",
+            "show_gids",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, html)
+
+    def test_docker_run_tab_has_independent_form(self) -> None:
+        html = Path("web/index.html").read_text(encoding="utf-8")
+        js = Path("web/app.js").read_text(encoding="utf-8")
+        css = Path("web/styles.css").read_text(encoding="utf-8")
+
         self.assertIn('id="docker-run-command-form"', html)
         self.assertIn('data-profile-panel="docker_run"', html)
         self.assertIn('data-profile-fields="docker_run:container"', html)
@@ -981,14 +1074,14 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertNotIn("name: 'docker_arg'", js)
         self.assertNotIn("Extra Docker args", html)
         self.assertNotIn("Extra Docker args", js)
-        self.assertNotIn("usesSharedModel: false", js)
+        self.assertIn("usesSharedModel: false", js)
         self.assertIn("usesSharedModel: true", js)
         self.assertIn("sharedModelForm.hidden = !activeUsesSharedModel();", js)
         self.assertIn("const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];", js)
         self.assertNotIn("appendDockerRunModelVolume(payload);", js)
         self.assertIn("syncDockerRunModelVolume", js)
         self.assertIn("const nextModelVolume = modelVolume ? `${modelVolume}:${modelVolume}` : '';", js)
-        self.assertIn("switchProfile('docker_run', { refresh: false });", js)
+        self.assertIn("switchProfile('host_check', { refresh: false });", js)
         self.assertIn("heading.className = 'list-field-heading';", js)
         self.assertIn("heading.append(labelText, addButton);", js)
         self.assertIn("data-add-list-item", js)

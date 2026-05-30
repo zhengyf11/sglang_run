@@ -27,14 +27,61 @@
     </form>
 
     <nav class="profile-switcher" aria-label="Command profile">
-      <button class="profile-button active" type="button" data-profile-button="docker_run">Docker Run</button>
+      <button class="profile-button active" type="button" data-profile-button="host_check">Host Check</button>
+      <button class="profile-button" type="button" data-profile-button="docker_run">Docker Run</button>
       <button class="profile-button" type="button" data-profile-button="prefill">Prefill</button>
       <button class="profile-button" type="button" data-profile-button="decode">Decode</button>
       <button class="profile-button" type="button" data-profile-button="router">Router</button>
     </nav>
 
     <main class="layout">
-      <section class="profile-panel" data-profile-panel="docker_run">
+      <section class="profile-panel" data-profile-panel="host_check">
+        <form id="host-check-command-form" class="panel form-panel host-check-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Configuration</p>
+              <h2>Host Check</h2>
+            </div>
+          </div>
+          <p class="host-check-intro">Review Issue #19 host prerequisites before Docker Run. These check and repair commands are display-only and must be copied and run manually after review.</p>
+          <div class="host-check-grid">
+            <section class="host-check-card" aria-labelledby="host-check-rdma-heading">
+              <h3 id="host-check-rdma-heading">RDMA memory registration</h3>
+              <p><code>RdmaTransport: Failed to register memory</code>; common causes are memlock not being unlimited and <code>nvidia_peermem</code> not being loaded.</p>
+              <h4>Check shell</h4>
+              <pre><code>ulimit -l
+lsmod | grep nvidia_peermem || true</code></pre>
+              <h4>Repair shell</h4>
+              <pre><code>ulimit -l unlimited
+sudo modprobe nvidia_peermem</code></pre>
+            </section>
+            <section class="host-check-card" aria-labelledby="host-check-runtime-heading">
+              <h3 id="host-check-runtime-heading">NVIDIA container runtime hook</h3>
+              <p><code>docker: Error response from daemon: exec: "nvidia-container-runtime-hook": executable file not found in $PATH</code>.</p>
+              <h4>Check shell</h4>
+              <pre><code>which nvidia-container-runtime-hook || true
+nvidia-ctk --version
+sudo docker info | grep -i 'runtime\|nvidia' || true</code></pre>
+              <h4>Repair shell</h4>
+              <pre><code>sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker</code></pre>
+            </section>
+            <section class="host-check-card" aria-labelledby="host-check-roce-heading">
+              <h3 id="host-check-roce-heading">RoCE bond / netplan</h3>
+              <p>RoCE bond/netplan configuration may affect <code>show_gids</code> and the network environment. Issue #19 records checking <code>/etc/netplan</code>, removing <code>01-netcfg.yaml</code>, applying netplan, and running <code>show_gids</code>.</p>
+              <h4>Check shell</h4>
+              <pre><code>ls /etc/netplan
+show_gids</code></pre>
+              <h4>Repair shell</h4>
+              <pre><code>sudo rm -i /etc/netplan/01-netcfg.yaml
+sudo netplan apply
+show_gids</code></pre>
+            </section>
+          </div>
+        </form>
+      </section>
+
+      <section class="profile-panel" data-profile-panel="docker_run" hidden>
         <form id="docker-run-command-form" class="panel form-panel">
           <div class="panel-heading">
             <div>

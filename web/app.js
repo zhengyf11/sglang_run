@@ -6,6 +6,12 @@ const sharedModelFields = [
 ];
 
 const profileConfigs = {
+  host_check: {
+    title: 'Host Check',
+    formId: 'host-check-command-form',
+    usesSharedModel: false,
+    groups: {},
+  },
   docker_run: {
     title: 'Docker Run parameters',
     formId: 'docker-run-command-form',
@@ -96,7 +102,7 @@ const ignoredModelPathSegments = new Set(['mnt', 'mount', 'model', 'models', 'vl
 const profiles = Object.keys(profileConfigs);
 
 const state = {
-  activeProfile: 'docker_run',
+  activeProfile: 'host_check',
   defaultsByProfile: {},
   parserMetadata: {},
   refreshTimer: null,
@@ -396,6 +402,7 @@ function deleteListFieldItem(field, index) {
 
 function applyDefaults(profile = state.activeProfile) {
   const form = forms[profile];
+  if (!form) return;
   const defaults = state.defaultsByProfile[profile] || {};
   for (const element of form.elements) {
     if (!element.name) continue;
@@ -493,7 +500,7 @@ async function loadAllDefaults() {
   setStatus('Loading defaults…');
   try {
     for (const profile of profiles) await loadDefaults(profile);
-    switchProfile('docker_run', { refresh: false });
+    switchProfile('host_check', { refresh: false });
     await refreshCommand();
   } catch (error) {
     setStatus('Defaults unavailable', 'error');
@@ -529,6 +536,7 @@ async function copyOutput(targetId, button) {
 
 renderFields();
 sharedModelForm.addEventListener('input', (event) => {
+  if (!activeUsesSharedModel()) return;
   if (event.target.name === 'model_path') {
     syncModelDerivedDefaults(event.target.value, state.activeProfile);
     if (state.activeProfile === 'docker_run') syncDockerRunModelVolume(event.target.value);
