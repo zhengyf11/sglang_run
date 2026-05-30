@@ -57,7 +57,11 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--chunked-prefill-size") + 1], "8192")
         self.assertEqual(cmd[cmd.index("--max-prefill-tokens") + 1], "65536")
         self.assertFalse(response["executed"])
+        self.assertEqual(response["resource_limits"], ["ulimit -l unlimited", "ulimit -n 65535"])
+        self.assertEqual(response["combined_shell"].splitlines()[:2], ["ulimit -l unlimited", "ulimit -n 65535"])
         self.assertIn("python3 -m sglang.launch_server", response["shell_command"])
+        self.assertNotIn("ulimit -l unlimited", response["shell_command"])
+        self.assertNotIn("ulimit -n 65535", response["shell_command"])
 
     def test_shell_command_formats_launch_args_on_separate_lines(self) -> None:
         response = prefill_command_web.build_command_response(
@@ -431,7 +435,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertIn("--speculative-algorithm", cmd)
         self.assertIn("--trust-remote-code", cmd)
         self.assertNotIn("--disable-cuda-graph", cmd)
-        self.assertIn("ulimit -l unlimited", response["combined_shell"])
+        self.assertEqual(response["resource_limits"], ["ulimit -l unlimited", "ulimit -n 65535"])
+        self.assertEqual(response["combined_shell"].splitlines()[:2], ["ulimit -l unlimited", "ulimit -n 65535"])
         self.assertIn("unset http_proxy", response["combined_shell"])
         self.assertIn("export NCCL_IB_GID_INDEX=3", response["combined_shell"])
 
@@ -482,7 +487,10 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--tool-call-parser") + 1], "glm47_moe")
         self.assertEqual(cmd[cmd.index("--reasoning-parser") + 1], "glm45")
         self.assertEqual(cmd[cmd.index("--retry-max-retries") + 1], "3")
+        self.assertEqual(response["resource_limits"], [])
         self.assertIn("unset http_proxy", response["combined_shell"])
+        self.assertNotIn("ulimit -l unlimited", response["combined_shell"])
+        self.assertNotIn("ulimit -n 65535", response["combined_shell"])
         self.assertNotIn("NCCL_IB_GID_INDEX", response["combined_shell"])
         self.assertNotIn("--trust-remote-code", cmd)
         self.assertNotIn("--disable-cuda-graph", cmd)
@@ -533,6 +541,8 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertNotIn("-e \\\n", response["shell_command"])
         self.assertFalse(response["executed"])
         self.assertEqual(response["resource_limits"], [])
+        self.assertNotIn("ulimit -l unlimited", response["combined_shell"])
+        self.assertNotIn("ulimit -n 65535", response["combined_shell"])
         self.assertEqual(response["env_exports"], [])
 
     def test_host_check_profile_returns_static_issue_19_shell_without_command(self) -> None:
@@ -545,6 +555,7 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(response["env_exports"], [])
         self.assertEqual(response["proxy_unsets"], [])
         self.assertEqual(response["shell_command"], response["combined_shell"])
+        self.assertNotEqual(response["combined_shell"].splitlines()[:2], ["ulimit -l unlimited", "ulimit -n 65535"])
         self.assertIn("https://github.com/zhengyf11/sglang_run/issues/19", response["config"]["issue"])
         for expected in (
             "RdmaTransport: Failed to register memory",

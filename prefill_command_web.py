@@ -671,7 +671,8 @@ def build_host_check_response() -> dict[str, Any]:
 
 
 def build_resource_limits(profile: str) -> list[str]:
-    return ["ulimit -l unlimited", "ulimit -n 65535"] if normalize_profile(profile) == DECODE_PROFILE else []
+    resource_limit_profiles = {PREFILL_PROFILE, DECODE_PROFILE}
+    return ["ulimit -l unlimited", "ulimit -n 65535"] if normalize_profile(profile) in resource_limit_profiles else []
 
 
 def build_command_response(payload: Mapping[str, Any] | None, profile: str = PREFILL_PROFILE) -> dict[str, Any]:
