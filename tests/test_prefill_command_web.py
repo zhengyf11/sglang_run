@@ -9,6 +9,16 @@ from unittest import mock
 import prefill_command_web
 
 
+def option_values(command: list[str], option: str) -> list[str]:
+    return [command[index + 1] for index, item in enumerate(command[:-1]) if item == option]
+
+
+def assert_option_block(testcase: unittest.TestCase, command: list[str], option: str, expected_values: list[str]) -> None:
+    option_indexes = [index for index, item in enumerate(command) if item == option]
+    testcase.assertEqual(option_indexes, list(range(option_indexes[0], option_indexes[0] + len(option_indexes) * 2, 2)))
+    testcase.assertEqual([command[index + 1] for index in option_indexes], expected_values)
+
+
 class CommandGenerationTests(unittest.TestCase):
     def test_builds_default_issue_command(self) -> None:
         response = prefill_command_web.build_command_response({})
@@ -504,6 +514,15 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
         self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
         self.assertIn("/mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8", cmd)
+        assert_option_block(
+            self,
+            cmd,
+            "-v",
+            ["/sys/fs/cgroup:/sys/fs/cgroup:ro", "/mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8"],
+        )
+        assert_option_block(self, cmd, "-e", ["NVIDIA_VISIBLE_DEVICES=all"])
+        self.assertLess(cmd.index("/mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8"), cmd.index("-e"))
+        self.assertLess(cmd.index("NVIDIA_VISIBLE_DEVICES=all"), cmd.index("--entrypoint"))
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
         self.assertEqual(cmd[-3:], ["lmsysorg/sglang:latest", "-lc", "tail -f /dev/null"])
         self.assertIn("-v /sys/fs/cgroup:/sys/fs/cgroup:ro \\", response["shell_command"])
@@ -536,13 +555,48 @@ class CommandGenerationTests(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--shm-size") + 1], "16g")
         self.assertIn("/data/models:/models:ro", cmd)
         self.assertIn("/data/cache:/cache", cmd)
-        self.assertIn("/models/custom:/models/custom", cmd)
+        self.assertNotIn("/models/custom:/models/custom", cmd)
         self.assertIn("HF_HOME=/cache", cmd)
         self.assertIn("TOKEN=value with spaces", cmd)
+        assert_option_block(self, cmd, "-v", ["/data/models:/models:ro", "/data/cache:/cache"])
+        assert_option_block(self, cmd, "-e", ["HF_HOME=/cache", "TOKEN=value with spaces"])
         self.assertNotIn("--cap-add=SYS_ADMIN", cmd)
         self.assertNotIn("--security-opt=seccomp=unconfined", cmd)
         self.assertNotIn("docker_arg", response["config"])
         self.assertEqual(cmd[-3:], ["custom/sglang:test", "-lc", "tail -f /dev/null"])
+
+
+    def test_docker_run_explicit_empty_volume_and_env_are_preserved(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {"volume": [], "env": [], "model_path": "/models/custom"},
+            profile="docker_run",
+        )
+        cmd = response["command"]
+
+        self.assertEqual(response["config"]["volume"], [])
+        self.assertEqual(response["config"]["env"], [])
+        self.assertNotIn("-v", cmd)
+        self.assertNotIn("-e", cmd)
+        self.assertNotIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
+        self.assertNotIn("/models/custom:/models/custom", cmd)
+        self.assertNotIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
+
+    def test_docker_run_omitted_volume_uses_current_model_path_default(self) -> None:
+        response = prefill_command_web.build_command_response(
+            {"model_path": "/models/custom"},
+            profile="docker_run",
+        )
+
+        self.assertEqual(
+            response["config"]["volume"],
+            ["/sys/fs/cgroup:/sys/fs/cgroup:ro", "/models/custom:/models/custom"],
+        )
+        assert_option_block(
+            self,
+            response["command"],
+            "-v",
+            ["/sys/fs/cgroup:/sys/fs/cgroup:ro", "/models/custom:/models/custom"],
+        )
 
 
 class HandlerTests(unittest.TestCase):
@@ -653,6 +707,11 @@ class HandlerTests(unittest.TestCase):
                 self.assertEqual(body["defaults"][key], expected_value)
                 if profile == "docker_run":
                     self.assertEqual(body["defaults"]["model_path"], "/mnt/GLM-5.1-FP8")
+                    self.assertEqual(
+                        body["defaults"]["volume"],
+                        "/sys/fs/cgroup:/sys/fs/cgroup:ro\n/mnt/GLM-5.1-FP8:/mnt/GLM-5.1-FP8",
+                    )
+                    self.assertEqual(body["defaults"]["env"], "NVIDIA_VISIBLE_DEVICES=all")
                     self.assertNotIn("docker_arg", body["defaults"])
 
     def test_get_defaults_rejects_unknown_profile(self) -> None:
@@ -808,7 +867,9 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("event.target.closest('[data-identify-model]')", js)
         self.assertIn("const modelPathInput = sharedModelForm.querySelector('input[name=\"model_path\"]');", js)
         self.assertIn("syncModelDerivedDefaults(modelPathInput?.value || '', state.activeProfile);", js)
-        self.assertIn("if (event.target.name === 'model_path') syncModelDerivedDefaults(event.target.value, state.activeProfile);", js)
+        self.assertIn("if (event.target.name === 'model_path') {", js)
+        self.assertIn("syncModelDerivedDefaults(event.target.value, state.activeProfile);", js)
+        self.assertIn("if (state.activeProfile === 'docker_run') syncDockerRunModelVolume(event.target.value);", js)
 
     def test_pipeline_options_are_hidden_until_pipeline_parallel_selected(self) -> None:
         html = Path("web/index.html").read_text(encoding="utf-8")
@@ -924,17 +985,27 @@ class WebUiStaticTests(unittest.TestCase):
         self.assertIn("usesSharedModel: true", js)
         self.assertIn("sharedModelForm.hidden = !activeUsesSharedModel();", js)
         self.assertIn("const payloadForms = activeUsesSharedModel() ? [sharedModelForm, activeForm()] : [activeForm()];", js)
-        self.assertIn("appendDockerRunModelVolume(payload);", js)
-        self.assertIn("const modelVolume = `${modelPath}:${modelPath}`;", js)
+        self.assertNotIn("appendDockerRunModelVolume(payload);", js)
+        self.assertIn("syncDockerRunModelVolume", js)
+        self.assertIn("const nextModelVolume = modelVolume ? `${modelVolume}:${modelVolume}` : '';", js)
         self.assertIn("switchProfile('docker_run', { refresh: false });", js)
+        self.assertIn("heading.className = 'list-field-heading';", js)
+        self.assertIn("heading.append(labelText, addButton);", js)
         self.assertIn("data-add-list-item", js)
         self.assertIn("data-delete-list-item", js)
         self.assertIn("addButton.textContent = '添加';", js)
         self.assertIn("deleteButton.textContent = '删除';", js)
-        self.assertIn("input.dataset.samePathMapping = 'true';", js)
-        self.assertIn("const value = input.dataset.samePathMapping === 'true' ? `${rawValue}:${rawValue}` : rawValue;", js)
+        self.assertIn("setListFieldItems(field, [...getListFieldItems(field), '']);", js)
+        self.assertIn("input.dataset.listItemInput = field;", js)
+        self.assertIn("syncListFieldValue(listInput.dataset.listItemInput);", js)
+        self.assertIn("deleteButton.dataset.index = String(index);", js)
+        self.assertIn("deleteListFieldItem(deleteListButton.dataset.deleteListItem, deleteListButton.dataset.index);", js)
+        self.assertNotIn("data-list-input", js)
+        self.assertNotIn("inputRow.append(input, addButton);", js)
+        self.assertNotIn("input.dataset.samePathMapping = 'true';", js)
+        self.assertNotIn("const value = input.dataset.samePathMapping === 'true' ? `${rawValue}:${rawValue}` : rawValue;", js)
         self.assertIn(".docker-run-grid", css)
-        self.assertIn(".list-input-row", css)
+        self.assertIn(".list-field-heading", css)
         self.assertIn(".delete-list-item-button", css)
 
     def test_docker_run_ui_does_not_expose_fixed_default_docker_args(self) -> None:
@@ -949,8 +1020,6 @@ class WebUiStaticTests(unittest.TestCase):
             "--runtime=nvidia",
             "--gpus all",
             "--ulimit memlock=-1:-1",
-            "/sys/fs/cgroup:/sys/fs/cgroup:ro",
-            "NVIDIA_VISIBLE_DEVICES=all",
             "--entrypoint /bin/bash",
         ):
             with self.subTest(fixed_arg=fixed_arg):

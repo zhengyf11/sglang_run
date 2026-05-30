@@ -7,12 +7,24 @@ from unittest import mock
 import run_sglang_container
 
 
+def option_values(command: list[str], option: str) -> list[str]:
+    return [command[index + 1] for index, item in enumerate(command[:-1]) if item == option]
+
+
+def assert_option_block(testcase: unittest.TestCase, command: list[str], option: str, expected_values: list[str]) -> None:
+    option_indexes = [index for index, item in enumerate(command) if item == option]
+    testcase.assertEqual(option_indexes, list(range(option_indexes[0], option_indexes[0] + len(option_indexes) * 2, 2)))
+    testcase.assertEqual([command[index + 1] for index in option_indexes], expected_values)
+
+
 class ParseArgsTests(unittest.TestCase):
     def test_model_is_not_required(self) -> None:
         args = run_sglang_container.parse_args([])
 
         self.assertEqual(args.image, "lmsysorg/sglang:latest")
         self.assertEqual(args.container_name, "sglang")
+        self.assertEqual(args.volume, ["/sys/fs/cgroup:/sys/fs/cgroup:ro"])
+        self.assertEqual(args.env, ["NVIDIA_VISIBLE_DEVICES=all"])
 
     def test_docker_passthrough_option_accepts_dash_prefixed_values(self) -> None:
         args = run_sglang_container.parse_args(
@@ -69,6 +81,9 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertIn("/sys/fs/cgroup:/sys/fs/cgroup:ro", cmd)
         self.assertIn("-e", cmd)
         self.assertIn("NVIDIA_VISIBLE_DEVICES=all", cmd)
+        assert_option_block(self, cmd, "-v", ["/sys/fs/cgroup:/sys/fs/cgroup:ro"])
+        assert_option_block(self, cmd, "-e", ["NVIDIA_VISIBLE_DEVICES=all"])
+        self.assertLess(cmd.index("NVIDIA_VISIBLE_DEVICES=all"), cmd.index("--entrypoint"))
         self.assertNotIn("--net=host", cmd)
         self.assertIn("--entrypoint", cmd)
         self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "/bin/bash")
@@ -123,6 +138,14 @@ class BuildDockerCommandTests(unittest.TestCase):
         self.assertIn("-e", cmd)
         self.assertIn("HF_HOME=/cache", cmd)
         self.assertIn("TOKEN=value with spaces", cmd)
+        assert_option_block(
+            self,
+            cmd,
+            "-v",
+            ["/sys/fs/cgroup:/sys/fs/cgroup:ro", "/data/models:/models:ro", "/data/cache:/cache"],
+        )
+        assert_option_block(self, cmd, "-e", ["NVIDIA_VISIBLE_DEVICES=all", "HF_HOME=/cache", "TOKEN=value with spaces"])
+        self.assertLess(cmd.index("TOKEN=value with spaces"), cmd.index("--ipc=host", cmd.index("TOKEN=value with spaces")))
         self.assertLess(cmd.index("--ipc=host"), cmd.index("custom/sglang:test"))
         self.assertEqual(cmd[-3:], ["custom/sglang:test", "-lc", "tail -f /dev/null"])
         self.assertNotIn("-p", cmd)
